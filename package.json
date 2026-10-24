@@ -1,6 +1,6 @@
 {
   "name": "pi-push-to-talk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Hold space to dictate into pi's prompt, transcribed locally with Whisper.",
   "keywords": [
@@ -14,6 +14,14 @@
   ],
   "license": "MIT",
   "author": "sqwxl",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sqwxl/pi-push-to-talk.git"
+  },
+  "homepage": "https://github.com/sqwxl/pi-push-to-talk#readme",
+  "bugs": {
+    "url": "https://github.com/sqwxl/pi-push-to-talk/issues"
+  },
   "engines": {
     "node": ">=20"
   },
