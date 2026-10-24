@@ -33,9 +33,6 @@ export const MIN_PHRASE_RMS = 0.005;
 /** SPACE held this long starts dictating. */
 export const HOLD_MS = 350;
 
-/** A space this soon after typing stays a space (pi-voicekit's value). */
-export const TYPING_COOLDOWN_MS = 400;
-
 export const MODEL_DIR = path.join(os.homedir(), ".pi", "models", "whisper-base");
 
 export const msToSamples = (ms: number): number => Math.round((SAMPLE_RATE * ms) / 1000);

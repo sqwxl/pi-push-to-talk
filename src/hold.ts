@@ -7,7 +7,7 @@
  * space the editor just typed is taken back and dictation starts.
  */
 import { isKeyRelease, isKeyRepeat, matchesKey } from "@earendil-works/pi-tui";
-import { HOLD_MS, TYPING_COOLDOWN_MS } from "./config.ts";
+import { HOLD_MS } from "./config.ts";
 import { trace } from "./debug.ts";
 import type { DictationEditor } from "./editor.ts";
 import { createRegion } from "./region.ts";
@@ -20,7 +20,7 @@ export type HoldDeps = {
 	notify: (message: string, level: "info" | "warning" | "error") => void;
 	status: (text: string | undefined) => void;
 	/** Test seam; production uses DictationSession. */
-	createSession?: (stt: Stt, ui: SessionUi) => DictationSession;
+	createSession?: (stt: Stt | Promise<Stt>, ui: SessionUi) => DictationSession;
 };
 
 /** A hold with no release event for this long is treated as stale. */
@@ -32,8 +32,10 @@ export class SpaceHold {
 	private holdTimer: ReturnType<typeof setTimeout> | undefined;
 	private holding = false;
 	private holdingSince = 0;
-	private lastTypingAt = 0;
 	private starting = false;
+	private beginQueued = false;
+	/** Bumped by each new press and by cancel; an older begin must not claim it. */
+	private holdId = 0;
 	/** Resolves when the previous session finished its final decode. */
 	private stopping: Promise<unknown> = Promise.resolve();
 
@@ -54,16 +56,15 @@ export class SpaceHold {
 		}
 
 		if (matchesKey(data, "space")) return this.handleSpace(isKeyRelease(data), isKeyRepeat(data));
-
-		if (!isKeyRelease(data) && !isKeyRepeat(data) && data.length === 1 && data.charCodeAt(0) >= 32) {
-			this.lastTypingAt = Date.now();
-		}
 		return false;
 	}
 
 	/** Abandon any open session without committing, e.g. when the prompt is submitted. */
 	cancel(): void {
+		trace("cancel");
 		this.holding = false;
+		this.holdId++;
+		this.beginQueued = false;
 		this.clearHoldTimer();
 		this.session?.cancel();
 		this.session = undefined;
@@ -82,6 +83,9 @@ export class SpaceHold {
 		if (released) {
 			this.holding = false;
 			this.clearHoldTimer();
+			// A session that failed by itself is already stopping; keep that
+			// shutdown visible to the next begin before the key is pressed again.
+			this.finish();
 			return false; // the space the editor typed stays
 		}
 
@@ -96,13 +100,14 @@ export class SpaceHold {
 		}
 
 		if (repeated) return false;
-		if (Date.now() - this.lastTypingAt < TYPING_COOLDOWN_MS) return false;
 
 		this.holding = true;
 		this.holdingSince = Date.now();
+		this.holdId++;
+		const id = this.holdId;
 		this.holdTimer = setTimeout(() => {
 			this.holdTimer = undefined;
-			void this.begin();
+			this.requestBegin(id);
 		}, HOLD_MS);
 		return false;
 	}
@@ -110,12 +115,27 @@ export class SpaceHold {
 	private finish(): void {
 		this.holding = false;
 		this.clearHoldTimer();
-		if (this.session) this.stopping = this.session.stop();
-		void this.stopping;
+		if (!this.session) return;
+		this.stopping = this.session.stop().catch((error: unknown) => {
+			this.deps.notify(`Dictation: ${String(error)}`, "error");
+		});
 	}
 
-	private async begin(): Promise<void> {
-		if (this.starting) return;
+	/** Start against the given press; queue it when an older begin is still unwinding. */
+	private requestBegin(id: number): void {
+		if (id !== this.holdId) return;
+		if (this.starting) {
+			this.beginQueued = true;
+			return;
+		}
+		void this.begin(id);
+	}
+
+	private async begin(id: number): Promise<void> {
+		if (this.starting) {
+			this.beginQueued = true;
+			return;
+		}
 		this.starting = true;
 		try {
 			const editor = this.deps.getEditor();
@@ -127,19 +147,20 @@ export class SpaceHold {
 			// A previous stop may still be decoding its tail; its write would land
 			// on top of the text this session is about to produce.
 			await this.stopping;
+			// A newer press now owns the buffer and will start its own session.
+			if (id !== this.holdId) return;
 
 			// Released before capture began: the tap must not vanish.
 			if (!this.holding) {
+				trace("begin: released while the previous stop finished, space restored");
 				editor.typeSpace();
 				return;
 			}
 
-			const stt = await this.deps.getStt();
-			if (!this.holding) {
-				editor.typeSpace();
-				return;
-			}
-
+			const stt = this.deps.getStt();
+			// Capture starts now; the session waits for the model on its first
+			// decode. Keep a load failure handled until that decode reports it.
+			void stt.catch(() => {});
 			const ui: SessionUi = {
 				write: (text, cursorOffset, partialLength) => editor.writeAtCursor(text, cursorOffset, partialLength),
 				status: (text) => this.deps.status(text),
@@ -149,6 +170,9 @@ export class SpaceHold {
 			const session = create(stt, ui);
 			this.session = session;
 			await session.start(createRegion(editor.getText(), editor.insertionOffset()));
+
+			// Cancelled while the device was opening: leave the buffer alone.
+			if (id !== this.holdId) return;
 
 			// Released while the capture device was opening: close it, and give the
 			// space back if nothing was transcribed.
@@ -162,6 +186,10 @@ export class SpaceHold {
 			if (!this.session?.isActive()) this.deps.getEditor()?.typeSpace();
 		} finally {
 			this.starting = false;
+			if (this.beginQueued) {
+				this.beginQueued = false;
+				if (this.holding && !this.session?.isActive()) this.requestBegin(this.holdId);
+			}
 		}
 	}
 

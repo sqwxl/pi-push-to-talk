@@ -25,7 +25,7 @@ const MIN_PHRASE_SAMPLES = msToSamples(MIN_PHRASE_MS);
 const TRAILING_PERIOD = /\.\s*$/;
 
 export class DictationSession {
-	private readonly stt: Stt;
+	private readonly stt: Promise<Stt>;
 	private readonly ui: SessionUi;
 	private readonly openMic: typeof openMicrophone;
 	private region: Region | undefined;
@@ -33,12 +33,14 @@ export class DictationSession {
 	private segmenter = new Segmenter();
 	private timer: ReturnType<typeof setInterval> | undefined;
 	private pending = 0;
+	private inFlight = new Set<Promise<void>>();
+	private stopPromise: Promise<boolean> | undefined;
 	private stopped = true;
 	/** Characters committed during this session, to tell a real result from silence. */
 	private committedChars = 0;
 
-	constructor(stt: Stt, ui: SessionUi, openMic: typeof openMicrophone = openMicrophone) {
-		this.stt = stt;
+	constructor(stt: Stt | Promise<Stt>, ui: SessionUi, openMic: typeof openMicrophone = openMicrophone) {
+		this.stt = Promise.resolve(stt);
 		this.ui = ui;
 		this.openMic = openMic;
 	}
@@ -70,7 +72,7 @@ export class DictationSession {
 			return;
 		}
 
-		this.timer = setInterval(() => void this.preview(), PARTIAL_INTERVAL_MS);
+		this.timer = setInterval(() => this.track(this.preview()), PARTIAL_INTERVAL_MS);
 	}
 
 	isActive(): boolean {
@@ -78,7 +80,14 @@ export class DictationSession {
 	}
 
 	/** Decode what is still open, commit it, and close the session. Returns whether anything was transcribed. */
-	async stop(): Promise<boolean> {
+	stop(): Promise<boolean> {
+		// Callers can race (a failure and a release); they must share one shutdown
+		// so the final write cannot land in a newer session's buffer.
+		this.stopPromise ??= this.finish();
+		return this.stopPromise;
+	}
+
+	private async finish(): Promise<boolean> {
 		if (this.stopped) return false;
 		this.stopped = true;
 		this.clearTimer();
@@ -91,13 +100,24 @@ export class DictationSession {
 			await this.decodePhrase(tail, true);
 		}
 
-		// A preview of audio that was never committed must not stay in the buffer.
+		// A phrase that closed just before the release may still be decoding. Its
+		// samples left the segmenter, so dropping the result loses that speech.
+		while (this.inFlight.size > 0) {
+			await Promise.allSettled([...this.inFlight]);
+		}
+
+		// If the tail was too short to decode, or its decode returned nothing, the
+		// preview is the only transcript of that audio. Commit it, do not wipe it.
 		if (this.region && this.region.partial.length > 0) {
-			this.region = { ...this.region, partial: "" };
-			this.write();
+			this.commitText(this.region.partial);
+			if (this.region.partial.length > 0) {
+				this.region = { ...this.region, partial: "" };
+				this.write();
+			}
 		}
 
 		const committed = this.committedChars > 0;
+		trace(`stop committed=${String(committed)} chars=${this.committedChars}`);
 		this.ui.status(undefined);
 		this.region = undefined;
 		return committed;
@@ -127,13 +147,14 @@ export class DictationSession {
 		if (rmsOf(closed.samples) < MIN_PHRASE_RMS) return;
 		// A phrase closing while the session is open is not the end of the thought:
 		// its trailing full stop is Whisper's, not the speaker's.
-		void this.decodePhrase(closed.samples, false);
+		this.track(this.decodePhrase(closed.samples, false));
 	}
 
 	private async decodePhrase(samples: Float32Array, final: boolean): Promise<void> {
 		this.pending++;
 		try {
-			const raw = await this.stt.recognize(samples);
+			const stt = await this.stt;
+			const raw = await stt.recognize(samples);
 			trace(`phrase ${samples.length} samples final=${String(final)} -> ${JSON.stringify(raw)}`);
 			const text = cleanTranscript(raw);
 			this.commitText(final ? text : text.replace(TRAILING_PERIOD, ""));
@@ -152,7 +173,8 @@ export class DictationSession {
 
 		this.pending++;
 		try {
-			const text = cleanTranscript(await this.stt.recognize(open));
+			const stt = await this.stt;
+			const text = cleanTranscript(await stt.recognize(open));
 			if (this.stopped || !this.region) return;
 			this.region = withPartial(this.region, text);
 			this.write();
@@ -176,9 +198,22 @@ export class DictationSession {
 		this.ui.write(renderRegion(this.region), regionCursorOffset(this.region), this.region.partial.length);
 	}
 
+	/** Keep the speech already captured; a failed stream must not eat the transcript. */
 	private fail(error: Error): void {
 		this.ui.notify(`Dictation: ${error.message}`, "error");
-		this.cancel();
+		void this.stop().catch((stopError: unknown) => {
+			trace(`stop after failure failed: ${String(stopError)}`);
+		});
+	}
+
+	/** Keep the decode visible to `stop` so it can wait for the commit. */
+	private track(work: Promise<void>): void {
+		const settled = work.then(
+			() => {},
+			() => {},
+		);
+		this.inFlight.add(settled);
+		void settled.finally(() => this.inFlight.delete(settled));
 	}
 
 	private clearTimer(): void {

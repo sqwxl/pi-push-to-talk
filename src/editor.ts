@@ -14,8 +14,6 @@ const MAX_CURSOR_REWIND = 4000;
 export class DictationEditor extends CustomEditor {
 	/** Characters before the cursor that are not committed yet. */
 	private partialLength = 0;
-	/** Last buffer state written, so identical rewrites are skipped. */
-	private lastWrite = "";
 
 	override render(width: number): string[] {
 		const lines = super.render(width);
@@ -33,9 +31,12 @@ export class DictationEditor extends CustomEditor {
 
 	/** Replace the buffer, keep the cursor at `cursorOffset`, dim `partialLength` before it. */
 	writeAtCursor(text: string, cursorOffset: number, partialLength: number): void {
-		const state = `${cursorOffset}:${partialLength}:${text}`;
-		if (state === this.lastWrite) return;
-		this.lastWrite = state;
+		// Compare against the live editor, not a remembered state: the buffer can
+		// change outside this extension (submit, undo, history). A stale cache
+		// would skip an identical write and the transcript would never appear.
+		if (this.getText() === text && this.insertionOffset() === cursorOffset && this.partialLength === partialLength) {
+			return;
+		}
 
 		this.setText(text);
 		let rewind = Math.min(MAX_CURSOR_REWIND, Math.max(0, text.length - cursorOffset));

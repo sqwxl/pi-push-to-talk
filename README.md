@@ -61,7 +61,7 @@ Both are off unless the environment variable is set; both write only to `/tmp`.
 
 | Variable | File | Content |
 |---|---|---|
-| `PI_DICTATION_DEBUG=1` | `/tmp/pi-dictation.log` | Space events, phrase decodes, recognizer errors |
+| `PI_DICTATION_DEBUG=1` | `/tmp/pi-dictation.log` | Space events, phrase decodes, cancels, and session commits |
 | `PI_DICTATION_PROBE=1` | `/tmp/pi-dictation-probe.log` | Every terminal key sequence, for diagnosing key encoding. Dictation is disabled in this mode. |
 
 ## Uninstall

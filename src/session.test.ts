@@ -97,3 +97,91 @@ test("stopping commits the tail exactly once", async () => {
 		mock.timers.reset();
 	}
 });
+
+test("a phrase that closed just before the release is still committed", async () => {
+	const writes: string[] = [];
+	const ui: SessionUi = { write: (text) => writes.push(text), status: () => {}, notify: () => {} };
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => (release = resolve));
+	let started = false;
+	const stt = {
+		recognize: async () => {
+			started = true;
+			await gate;
+			return "hello world";
+		},
+	} as unknown as Stt;
+	let feed: ((samples: Float32Array) => void) | undefined;
+	const session = new DictationSession(stt, ui, async (onSamples) => {
+		feed = onSamples;
+		return { stop: () => {} };
+	});
+
+	await session.start(createRegion("", 0));
+	feed?.(speech(500));
+	feed?.(new Float32Array(msToSamples(2500))); // closes the phrase on silence
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(started, true, "the phrase decode is in flight");
+
+	try {
+		const stopping = session.stop(); // its samples are no longer in the segmenter
+		release();
+		await stopping;
+
+		assert.equal(writes.at(-1), "hello world");
+	} finally {
+		release(); // never leave the decode hanging when an assertion fails
+	}
+});
+
+test("a preview survives a final decode that returns nothing", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	try {
+		const writes: string[] = [];
+		const ui: SessionUi = { write: (text) => writes.push(text), status: () => {}, notify: () => {} };
+		let calls = 0;
+		const stt = { recognize: async () => (++calls === 1 ? "hello there" : "") } as unknown as Stt;
+		let feed: ((samples: Float32Array) => void) | undefined;
+		const session = new DictationSession(stt, ui, async (onSamples) => {
+			feed = onSamples;
+			return { stop: () => {} };
+		});
+
+		await session.start(createRegion("", 0));
+		feed?.(speech(500));
+		mock.timers.tick(PARTIAL_INTERVAL_MS);
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(writes.at(-1), "hello there");
+
+		await session.stop();
+		assert.equal(writes.at(-1), "hello there", "the transcript the user saw must not be wiped");
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("speech captured while the model loads is transcribed", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	try {
+		const writes: string[] = [];
+		const ui: SessionUi = { write: (text) => writes.push(text), status: () => {}, notify: () => {} };
+		let loaded!: (stt: Stt) => void;
+		const ready = new Promise<Stt>((resolve) => (loaded = resolve));
+		let feed: ((samples: Float32Array) => void) | undefined;
+		const session = new DictationSession(ready, ui, async (onSamples) => {
+			feed = onSamples;
+			return { stop: () => {} };
+		});
+
+		await session.start(createRegion("", 0));
+		feed?.(speech(500)); // the user speaks before the model is ready
+
+		const stopping = session.stop();
+		loaded({ recognize: async () => "first words" } as unknown as Stt);
+		await stopping;
+
+		assert.equal(writes.at(-1), "first words");
+	} finally {
+		mock.timers.reset();
+	}
+});
