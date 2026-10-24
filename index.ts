@@ -7,6 +7,7 @@ import { Stt } from "./src/stt.ts";
 type Ui = {
 	notify: (message: string, level: "info" | "warning" | "error") => void;
 	setStatus: (key: string, text: string | undefined) => void;
+	theme: { fg: (color: "error", text: string) => string };
 	onTerminalInput: (handler: (data: string) => { consume?: boolean } | undefined) => () => void;
 };
 
@@ -18,15 +19,17 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 
 	const getStt = (): Promise<Stt> => {
 		if (!sttPromise) {
-			sttPromise = Stt.create(undefined, (message) => ui?.setStatus("dictation", message)).then(
+			// Model progress has its own key: the listening indicator blinks on the
+			// dictation key and must not overwrite a first-run download.
+			sttPromise = Stt.create(undefined, (message) => ui?.setStatus("dictation-model", message)).then(
 				(stt) => {
-					ui?.setStatus("dictation", undefined);
+					ui?.setStatus("dictation-model", undefined);
 					return stt;
 				},
 				(error: unknown) => {
 					// Do not cache a failure: the next hold retries.
 					sttPromise = undefined;
-					ui?.setStatus("dictation", undefined);
+					ui?.setStatus("dictation-model", undefined);
 					throw error;
 				},
 			);
@@ -39,6 +42,10 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 		getStt,
 		notify: (message, level) => ui?.notify(message, level),
 		status: (text) => ui?.setStatus("dictation", text),
+		indicator: (state, filled) => {
+			const circle = filled ? (ui?.theme.fg("error", "●") ?? "●") : "○";
+			return `${circle} ${state === "loading" ? "loading model" : "listening"}`;
+		},
 	});
 
 	pi.on("session_start", (_event, ctx) => {

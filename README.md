@@ -25,7 +25,7 @@ Remove any other voice extension first. Several of them also bind space or repla
 | Pause 2.5 s while holding | The open phrase is committed and dictation continues |
 | Tap space | An ordinary space, as usual |
 
-While you speak, the open phrase is drawn dim; committed text is normal.
+While you speak, the open phrase is drawn dim; committed text is normal. The footer alternates a red `●` with `○` every 600 ms: `● listening` while the microphone is live, or `● loading model` until Whisper is ready.
 
 ## First run
 

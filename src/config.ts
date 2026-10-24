@@ -33,6 +33,9 @@ export const MIN_PHRASE_RMS = 0.005;
 /** SPACE held this long starts dictating. */
 export const HOLD_MS = 350;
 
+/** The listening indicator alternates filled and empty at this interval. */
+export const LISTENING_BLINK_MS = 600;
+
 export const MODEL_DIR = path.join(os.homedir(), ".pi", "models", "whisper-base");
 
 export const msToSamples = (ms: number): number => Math.round((SAMPLE_RATE * ms) / 1000);

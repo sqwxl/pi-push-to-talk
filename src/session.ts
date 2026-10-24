@@ -5,7 +5,7 @@
  * is ever rewritten, so the rest of the buffer stays the user's.
  */
 import { openMicrophone, type Microphone } from "./capture.ts";
-import { MIN_PHRASE_MS, MIN_PHRASE_RMS, PARTIAL_INTERVAL_MS, msToSamples } from "./config.ts";
+import { LISTENING_BLINK_MS, MIN_PHRASE_MS, MIN_PHRASE_RMS, PARTIAL_INTERVAL_MS, msToSamples } from "./config.ts";
 import { trace } from "./debug.ts";
 import { commitPartial, joinText, regionCursorOffset, renderRegion, withPartial, type Region } from "./region.ts";
 import { Segmenter, rmsOf } from "./segmenter.ts";
@@ -16,6 +16,8 @@ export type SessionUi = {
 	/** Replace the editor text, place the cursor at `cursorOffset`, dim `partialLength` before it. */
 	write(text: string, cursorOffset: number, partialLength: number): void;
 	status(text: string | undefined): void;
+	/** Indicator text for a blink phase, already coloured. */
+	indicator(state: "loading" | "listening", filled: boolean): string;
 	notify(message: string, level: "info" | "warning" | "error"): void;
 };
 
@@ -32,6 +34,10 @@ export class DictationSession {
 	private mic: Microphone | undefined;
 	private segmenter = new Segmenter();
 	private timer: ReturnType<typeof setInterval> | undefined;
+	private listeningTimer: ReturnType<typeof setInterval> | undefined;
+	private listeningFilled = true;
+	/** The recognizer is still loading until this flips; the indicator says so. */
+	private modelReady = false;
 	private pending = 0;
 	private inFlight = new Set<Promise<void>>();
 	private stopPromise: Promise<boolean> | undefined;
@@ -43,6 +49,15 @@ export class DictationSession {
 		this.stt = Promise.resolve(stt);
 		this.ui = ui;
 		this.openMic = openMic;
+
+		void this.stt.then(
+			() => {
+				this.modelReady = true;
+				if (!this.stopped) this.writeListening();
+			},
+			// The first decode or stop reports a load failure; keep it handled.
+			() => {},
+		);
 	}
 
 	async start(region: Region): Promise<void> {
@@ -51,7 +66,7 @@ export class DictationSession {
 		this.region = region;
 		this.segmenter = new Segmenter();
 		this.committedChars = 0;
-		this.ui.status("MIC listening");
+		this.startListening();
 
 		try {
 			this.mic = await this.openMic(
@@ -60,7 +75,7 @@ export class DictationSession {
 			);
 		} catch (error) {
 			this.stopped = true;
-			this.ui.status(undefined);
+			this.stopListening();
 			this.ui.notify(`Dictation: microphone unavailable (${String(error)})`, "error");
 			return;
 		}
@@ -118,7 +133,7 @@ export class DictationSession {
 
 		const committed = this.committedChars > 0;
 		trace(`stop committed=${String(committed)} chars=${this.committedChars}`);
-		this.ui.status(undefined);
+		this.stopListening();
 		this.region = undefined;
 		return committed;
 	}
@@ -136,7 +151,7 @@ export class DictationSession {
 			const cleaned = joinText(this.region.before, this.region.after);
 			this.ui.write(cleaned, this.region.before.length, 0);
 		}
-		this.ui.status(undefined);
+		this.stopListening();
 		this.region = undefined;
 	}
 
@@ -196,6 +211,29 @@ export class DictationSession {
 	private write(): void {
 		if (!this.region) return;
 		this.ui.write(renderRegion(this.region), regionCursorOffset(this.region), this.region.partial.length);
+	}
+
+	/** Alternate a filled red circle with an empty one while the session is live. */
+	private startListening(): void {
+		this.stopListening();
+		this.listeningFilled = true;
+		this.writeListening();
+		this.listeningTimer = setInterval(() => {
+			this.listeningFilled = !this.listeningFilled;
+			this.writeListening();
+		}, LISTENING_BLINK_MS);
+	}
+
+	private writeListening(): void {
+		this.ui.status(this.ui.indicator(this.modelReady ? "listening" : "loading", this.listeningFilled));
+	}
+
+	private stopListening(): void {
+		if (this.listeningTimer) {
+			clearInterval(this.listeningTimer);
+			this.listeningTimer = undefined;
+		}
+		this.ui.status(undefined);
 	}
 
 	/** Keep the speech already captured; a failed stream must not eat the transcript. */

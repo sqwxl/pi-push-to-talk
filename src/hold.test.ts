@@ -79,6 +79,7 @@ function harness(getStt: () => Promise<unknown> = async () => ({})) {
 		getStt: getStt as never,
 		notify: () => {},
 		status: () => {},
+		indicator: (state, filled) => `${filled ? "●" : "○"} ${state === "loading" ? "loading model" : "listening"}`,
 		createSession: () => {
 			const session: FakeSession = {
 				active: false,

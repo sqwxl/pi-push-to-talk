@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
-import { PARTIAL_INTERVAL_MS, msToSamples } from "./config.ts";
+import { LISTENING_BLINK_MS, PARTIAL_INTERVAL_MS, msToSamples } from "./config.ts";
 import { createRegion } from "./region.ts";
 import { DictationSession, type SessionUi } from "./session.ts";
 import type { Stt } from "./stt.ts";
@@ -17,9 +17,11 @@ const speech = (ms: number): Float32Array => {
 
 function harness(transcript: string) {
 	const writes: string[] = [];
+	const statuses: Array<string | undefined> = [];
 	const ui: SessionUi = {
 		write: (text) => writes.push(text),
-		status: () => {},
+		status: (text) => statuses.push(text),
+		indicator: (state, filled) => `${filled ? "●" : "○"} ${state === "loading" ? "loading model" : "listening"}`,
 		notify: () => {},
 	};
 	let feed: ((samples: Float32Array) => void) | undefined;
@@ -28,7 +30,7 @@ function harness(transcript: string) {
 		feed = onSamples;
 		return { stop: () => {} };
 	});
-	return { session, writes, send: (samples: Float32Array) => feed?.(samples) };
+	return { session, writes, statuses, send: (samples: Float32Array) => feed?.(samples) };
 }
 
 test("the preview writes cleaned text into the region", async () => {
@@ -98,9 +100,60 @@ test("stopping commits the tail exactly once", async () => {
 	}
 });
 
+test("the listening indicator alternates every blink interval", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	try {
+		const { session, statuses } = harness("ignored");
+		await session.start(createRegion("", 0));
+		assert.equal(statuses.at(-1), "● listening");
+
+		mock.timers.tick(LISTENING_BLINK_MS);
+		assert.equal(statuses.at(-1), "○ listening");
+		mock.timers.tick(LISTENING_BLINK_MS);
+		assert.equal(statuses.at(-1), "● listening");
+
+		await session.stop();
+		assert.equal(statuses.at(-1), undefined);
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("the title says loading model until the recognizer is ready", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	try {
+		const statuses: Array<string | undefined> = [];
+		const ui: SessionUi = {
+			write: () => {},
+			status: (text) => statuses.push(text),
+			indicator: (state, filled) => `${filled ? "●" : "○"} ${state === "loading" ? "loading model" : "listening"}`,
+			notify: () => {},
+		};
+		let loaded!: (stt: Stt) => void;
+		const ready = new Promise<Stt>((resolve) => (loaded = resolve));
+		const session = new DictationSession(ready, ui, async () => ({ stop: () => {} }));
+
+		await session.start(createRegion("", 0));
+		assert.equal(statuses.at(-1), "● loading model");
+
+		loaded({ recognize: async () => "" } as unknown as Stt);
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(statuses.at(-1), "● listening");
+
+		await session.stop();
+	} finally {
+		mock.timers.reset();
+	}
+});
+
 test("a phrase that closed just before the release is still committed", async () => {
 	const writes: string[] = [];
-	const ui: SessionUi = { write: (text) => writes.push(text), status: () => {}, notify: () => {} };
+	const ui: SessionUi = {
+		write: (text) => writes.push(text),
+		status: () => {},
+		indicator: (state, filled) => `${filled ? "●" : "○"} ${state === "loading" ? "loading model" : "listening"}`,
+		notify: () => {},
+	};
 	let release!: () => void;
 	const gate = new Promise<void>((resolve) => (release = resolve));
 	let started = false;
@@ -138,7 +191,12 @@ test("a preview survives a final decode that returns nothing", async () => {
 	mock.timers.enable({ apis: ["setInterval", "Date"] });
 	try {
 		const writes: string[] = [];
-		const ui: SessionUi = { write: (text) => writes.push(text), status: () => {}, notify: () => {} };
+		const ui: SessionUi = {
+			write: (text) => writes.push(text),
+			status: () => {},
+			indicator: (state, filled) => `${filled ? "●" : "○"} ${state === "loading" ? "loading model" : "listening"}`,
+			notify: () => {},
+		};
 		let calls = 0;
 		const stt = { recognize: async () => (++calls === 1 ? "hello there" : "") } as unknown as Stt;
 		let feed: ((samples: Float32Array) => void) | undefined;
@@ -164,7 +222,12 @@ test("speech captured while the model loads is transcribed", async () => {
 	mock.timers.enable({ apis: ["setInterval", "Date"] });
 	try {
 		const writes: string[] = [];
-		const ui: SessionUi = { write: (text) => writes.push(text), status: () => {}, notify: () => {} };
+		const ui: SessionUi = {
+			write: (text) => writes.push(text),
+			status: () => {},
+			indicator: (state, filled) => `${filled ? "●" : "○"} ${state === "loading" ? "loading model" : "listening"}`,
+			notify: () => {},
+		};
 		let loaded!: (stt: Stt) => void;
 		const ready = new Promise<Stt>((resolve) => (loaded = resolve));
 		let feed: ((samples: Float32Array) => void) | undefined;
