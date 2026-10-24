@@ -1,0 +1,34 @@
+{
+  "name": "pi-push-to-talk",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Hold space to dictate into pi's prompt, transcribed locally with Whisper.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "dictation",
+    "push-to-talk",
+    "speech-to-text",
+    "whisper",
+    "local"
+  ],
+  "license": "MIT",
+  "author": "sqwxl",
+  "engines": {
+    "node": ">=20"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "files": ["index.ts", "src/**/*.ts", "!src/**/*.test.ts", "README.md", "LICENSE"],
+  "dependencies": {
+    "decibri": "^3.4.2",
+    "sherpa-onnx-node": "^1.13.8"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": { "optional": true }
+  }
+}
