@@ -50,7 +50,6 @@ Extraction uses the system `tar` with bzip2 support, which is present on macOS, 
 
 - Undo history records each preview rewrite; `Ctrl+Z` after a dictation steps back through them. The editor API offers no way to write without an undo entry.
 - English only.
-- A true sentence end followed by a pause longer than 2.5 s loses its full stop, because a mid-session commit drops Whisper's trailing period.
 - Brackets are stripped from transcripts, since Whisper emits them as sound captions. Dictating code with brackets is not supported.
 - The cursor is restored with simulated left-arrow presses, capped at 4,000 characters. Inserting near the start of a very long prompt can leave the cursor short of the dictation point.
 - Nested editors (dialogs) do not accept dictation, only normal typing.

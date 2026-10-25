@@ -15,7 +15,7 @@ const speech = (ms: number): Float32Array => {
 	return samples;
 };
 
-function harness(transcript: string) {
+function harness(transcript: string | string[]) {
 	const writes: string[] = [];
 	const statuses: Array<string | undefined> = [];
 	const ui: SessionUi = {
@@ -25,13 +25,17 @@ function harness(transcript: string) {
 		notify: () => {},
 	};
 	let feed: ((samples: Float32Array) => void) | undefined;
-	const stt = { recognize: async () => transcript } as unknown as Stt;
+	const texts = Array.isArray(transcript) ? [...transcript] : [transcript];
+	const stt = { recognize: async () => texts.shift() ?? "" } as unknown as Stt;
 	const session = new DictationSession(stt, ui, async (onSamples) => {
 		feed = onSamples;
 		return { stop: () => {} };
 	});
 	return { session, writes, statuses, send: (samples: Float32Array) => feed?.(samples) };
 }
+
+const decode = (session: DictationSession, samples: Float32Array): Promise<void> =>
+	(session as unknown as { decodePhrase(s: Float32Array): Promise<void> }).decodePhrase(samples);
 
 test("the preview writes cleaned text into the region", async () => {
 	mock.timers.enable({ apis: ["setInterval", "Date"] });
@@ -50,18 +54,46 @@ test("the preview writes cleaned text into the region", async () => {
 	}
 });
 
-test("a mid-session commit drops Whisper's trailing full stop", async () => {
+test("a mid-session commit keeps the model's punctuation", async () => {
 	mock.timers.enable({ apis: ["setInterval", "Date"] });
 	try {
-		const { session, writes } = harness("the sentence continues.");
+		const { session, writes } = harness(["I paused.", "Next sentence."]);
 		await session.start(createRegion("", 0));
 
-		const decode = (session as unknown as { decodePhrase(s: Float32Array, f: boolean): Promise<void> }).decodePhrase.bind(session);
-		await decode(speech(400), false);
-		assert.equal(writes.at(-1), "the sentence continues");
+		await decode(session, speech(400));
+		assert.equal(writes.at(-1), "I paused.");
 
-		await decode(speech(400), true);
-		assert.equal(writes.at(-1), "the sentence continues the sentence continues.");
+		await decode(session, speech(400));
+		assert.equal(writes.at(-1), "I paused. Next sentence.");
+		session.cancel();
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("an ellipsis survives a mid-session commit", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	try {
+		const { session, writes } = harness("wait...");
+		await session.start(createRegion("", 0));
+
+		await decode(session, speech(400));
+		assert.equal(writes.at(-1), "wait...");
+		session.cancel();
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("a mid-sentence pause keeps a trailing comma", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	try {
+		const { session, writes } = harness(["I think,", "so we should go."]);
+		await session.start(createRegion("", 0));
+
+		await decode(session, speech(400));
+		await decode(session, speech(400));
+		assert.equal(writes.at(-1), "I think, so we should go.");
 		session.cancel();
 	} finally {
 		mock.timers.reset();

@@ -23,9 +23,6 @@ export type SessionUi = {
 
 const MIN_PHRASE_SAMPLES = msToSamples(MIN_PHRASE_MS);
 
-/** Whisper ends a decode with a full stop; mid-session that is not the sentence end. */
-const TRAILING_PERIOD = /\.\s*$/;
-
 export class DictationSession {
 	private readonly stt: Promise<Stt>;
 	private readonly ui: SessionUi;
@@ -112,7 +109,7 @@ export class DictationSession {
 		const tail = this.segmenter.open();
 		this.segmenter.reset();
 		if (tail.length >= MIN_PHRASE_SAMPLES && rmsOf(tail) >= MIN_PHRASE_RMS) {
-			await this.decodePhrase(tail, true);
+			await this.decodePhrase(tail);
 		}
 
 		// A phrase that closed just before the release may still be decoding. Its
@@ -160,19 +157,18 @@ export class DictationSession {
 		const closed = this.segmenter.add(samples);
 		if (!closed) return;
 		if (rmsOf(closed.samples) < MIN_PHRASE_RMS) return;
-		// A phrase closing while the session is open is not the end of the thought:
-		// its trailing full stop is Whisper's, not the speaker's.
-		this.track(this.decodePhrase(closed.samples, false));
+		this.track(this.decodePhrase(closed.samples));
 	}
 
-	private async decodePhrase(samples: Float32Array, final: boolean): Promise<void> {
+	private async decodePhrase(samples: Float32Array): Promise<void> {
 		this.pending++;
 		try {
 			const stt = await this.stt;
 			const raw = await stt.recognize(samples);
-			trace(`phrase ${samples.length} samples final=${String(final)} -> ${JSON.stringify(raw)}`);
-			const text = cleanTranscript(raw);
-			this.commitText(final ? text : text.replace(TRAILING_PERIOD, ""));
+			trace(`phrase ${samples.length} samples -> ${JSON.stringify(raw)}`);
+			// Keep the model's punctuation: a pause usually is a real boundary, and
+			// removing a mark here also turned "..." into "..".
+			this.commitText(cleanTranscript(raw));
 		} catch (error) {
 			this.fail(error instanceof Error ? error : new Error(String(error)));
 		} finally {
