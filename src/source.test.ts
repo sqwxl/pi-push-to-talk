@@ -86,6 +86,31 @@ test("a host with no microphone points at the setup command", async () => {
 	assert.deepEqual(used, ["remote", "device"]);
 });
 
+test("a device that fails after opening still points at the setup command", async () => {
+	const errors: string[] = [];
+	const late = {
+		openDevice: async (_samples: unknown, onError: (error: Error) => void) => {
+			onError(new Error("ALSA function failed."));
+			return mic;
+		},
+		openRemote: async () => {
+			throw new Error("connect ECONNREFUSED");
+		},
+	};
+	await withTarget(undefined, async () => {
+		await openAudioSource(
+			{
+				onSamples: () => {},
+				onError: (error) => errors.push(error.message),
+				notify: () => {},
+			},
+			late,
+		);
+	});
+	assert.equal(errors.length, 1);
+	assert.match(errors[0] ?? "", /ALSA function failed\. Run \/dictation-setup to dictate/);
+});
+
 test("an unreachable stream falls back to the device and says so", async () => {
 	const used: string[] = [];
 	const notices: string[] = [];

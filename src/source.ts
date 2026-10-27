@@ -30,6 +30,12 @@ export type OpenMic = (source: AudioSource, openers?: Openers) => Promise<Microp
 
 const defaultOpeners: Openers = { openDevice: openMicrophone, openRemote: openStream };
 
+/** Shown when neither the stream nor the local device can record. */
+const SETUP_HINT = " Run /dictation-setup to dictate with the computer you type on";
+
+const withHint = (error: Error): Error =>
+	new Error(`${error.message.replace(/\.$/, "")}.${SETUP_HINT}`);
+
 export async function openAudioSource(
 	source: AudioSource,
 	openers: Openers = defaultOpeners,
@@ -50,10 +56,10 @@ export async function openAudioSource(
 		}
 	}
 	try {
-		return await openers.openDevice(source.onSamples, source.onError);
+		// A host with no audio input resolves the device and then reports the
+		// failure asynchronously, so the hint belongs on its error, not on throw.
+		return await openers.openDevice(source.onSamples, (error) => source.onError(withHint(error)));
 	} catch (error) {
-		const reason = error instanceof Error ? error.message : String(error);
-		// A host with no audio input is the case the remote setup exists for.
-		throw new Error(`${reason.replace(/\.$/, "")}. Run /dictation-setup to dictate with the computer you type on`);
+		throw withHint(error instanceof Error ? error : new Error(String(error)));
 	}
 }
