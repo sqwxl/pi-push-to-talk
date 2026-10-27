@@ -109,7 +109,7 @@ test("a device that fails after opening still points at the setup command", asyn
 		);
 	});
 	assert.equal(errors.length, 1, "the failure is reported once");
-	assert.match(errors[0] ?? "", /No microphone on this host\. Run \/dictation-setup/);
+	assert.match(errors[0] ?? "", /No microphone on this host\. Run \/dictation-setup <ssh-host>/);
 });
 
 test("an unreachable stream falls back to the device and says so", async () => {

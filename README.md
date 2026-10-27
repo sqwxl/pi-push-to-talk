@@ -43,6 +43,8 @@ On the host running pi:
 /dictation-setup bluefin.local
 ```
 
+Without an argument it asks for the host.
+
 It writes a setup script there and shows the one line to run on the machine with the microphone:
 
 ```sh

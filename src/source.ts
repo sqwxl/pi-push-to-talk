@@ -32,7 +32,7 @@ const defaultOpeners: Openers = { openDevice: openMicrophone, openRemote: openSt
 
 /** Shown when neither the stream nor the local device can record. */
 const NO_MICROPHONE =
-	"No microphone on this host. Run /dictation-setup to dictate with the computer you type on";
+	"No microphone on this host. Run /dictation-setup <ssh-host> to generate the command you will need to run on the machine you are connecting from";
 
 const withHint = (error: Error): Error => {
 	// The backend error names ALSA or CoreAudio internals; keep it in the trace

@@ -49,14 +49,17 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 		},
 	});
 
-	// The microphone is often on the machine running the terminal, not on this
-	// host. Point the user at the one-time setup when they want that.
+	// The microphone can be on the machine running the terminal instead of this
+	// host. This prepares the command that sets that up from the other side.
 	pi.registerCommand("dictation-setup", {
-		description: "Dictate with the microphone on the machine you type on",
+		description: "Generate the command that sets up dictation with your own microphone",
 		handler: async (args, ctx) => {
-			const host = parseHost(args);
+			// Both the notice and the command offer the host, so the missing
+			// argument never turns into a usage error the user cannot act on.
+			const typed = args.trim() || (await ctx.ui.input("SSH host for this machine", "bluefin.local")) || "";
+			const host = parseHost(typed);
 			if (!host) {
-				ctx.ui.notify("Usage: /dictation-setup <ssh-host>, for example /dictation-setup bluefin.local", "warning");
+				ctx.ui.notify(`Dictation: "${typed.trim()}" is not an SSH host name`, "error");
 				return;
 			}
 			try {
