@@ -7,7 +7,7 @@
  * space the editor just typed is taken back and dictation starts.
  */
 import { isKeyRelease, isKeyRepeat, matchesKey } from "@earendil-works/pi-tui";
-import { HOLD_MS } from "./config.ts";
+import { HOLD_MS, RELEASE_GAP_MS } from "./config.ts";
 import { trace } from "./debug.ts";
 import type { DictationEditor } from "./editor.ts";
 import { createRegion } from "./region.ts";
@@ -38,6 +38,8 @@ export class SpaceHold {
 	private beginQueued = false;
 	/** Bumped by each new press and by cancel; an older begin must not claim it. */
 	private holdId = 0;
+	/** When the previous space event arrived, to spot a missing release. */
+	private lastSpaceAt = 0;
 	/** Resolves when the previous session finished its final decode. */
 	private stopping: Promise<unknown> = Promise.resolve();
 
@@ -73,12 +75,20 @@ export class SpaceHold {
 	}
 
 	private handleSpace(released: boolean, repeated: boolean): boolean {
+		const now = Date.now();
+		// Auto-repeat of a held key arrives every few tens of ms; a press preceded
+		// by a longer gap is a new press, so the release before it was lost.
+		const gap = now - this.lastSpaceAt;
+		this.lastSpaceAt = now;
+
 		trace(
-			`space release=${String(released)} repeat=${String(repeated)} holding=${String(this.holding)} active=${String(this.session?.isActive())}`,
+			`space release=${String(released)} repeat=${String(repeated)} gap=${gap} holding=${String(this.holding)} active=${String(this.session?.isActive())}`,
 		);
 
 		if (this.session?.isActive()) {
-			if (released) this.finish();
+			// Without this a terminal that drops key releases leaves the session
+			// open forever, which means an open microphone.
+			if (released || gap >= RELEASE_GAP_MS) this.finish();
 			return true; // space events are meaningless while dictating
 		}
 
@@ -94,7 +104,7 @@ export class SpaceHold {
 		// Repeats of a held key must not type more spaces; the first one is the
 		// space we take back when the hold threshold is reached.
 		if (this.holding) {
-			if (Date.now() - this.holdingSince > STALE_HOLD_MS) {
+			if (now - this.holdingSince > STALE_HOLD_MS) {
 				this.holding = false; // release was lost; recover typing
 				return false;
 			}

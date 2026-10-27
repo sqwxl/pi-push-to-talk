@@ -27,7 +27,7 @@ function harness(transcript: string | string[]) {
 	let feed: ((samples: Float32Array) => void) | undefined;
 	const texts = Array.isArray(transcript) ? [...transcript] : [transcript];
 	const stt = { recognize: async () => texts.shift() ?? "" } as unknown as Stt;
-	const session = new DictationSession(stt, ui, async (onSamples) => {
+	const session = new DictationSession(stt, ui, async ({ onSamples }) => {
 		feed = onSamples;
 		return { stop: () => {} };
 	});
@@ -197,7 +197,7 @@ test("a phrase that closed just before the release is still committed", async ()
 		},
 	} as unknown as Stt;
 	let feed: ((samples: Float32Array) => void) | undefined;
-	const session = new DictationSession(stt, ui, async (onSamples) => {
+	const session = new DictationSession(stt, ui, async ({ onSamples }) => {
 		feed = onSamples;
 		return { stop: () => {} };
 	});
@@ -232,7 +232,7 @@ test("a preview survives a final decode that returns nothing", async () => {
 		let calls = 0;
 		const stt = { recognize: async () => (++calls === 1 ? "hello there" : "") } as unknown as Stt;
 		let feed: ((samples: Float32Array) => void) | undefined;
-		const session = new DictationSession(stt, ui, async (onSamples) => {
+		const session = new DictationSession(stt, ui, async ({ onSamples }) => {
 			feed = onSamples;
 			return { stop: () => {} };
 		});
@@ -263,7 +263,7 @@ test("speech captured while the model loads is transcribed", async () => {
 		let loaded!: (stt: Stt) => void;
 		const ready = new Promise<Stt>((resolve) => (loaded = resolve));
 		let feed: ((samples: Float32Array) => void) | undefined;
-		const session = new DictationSession(ready, ui, async (onSamples) => {
+		const session = new DictationSession(ready, ui, async ({ onSamples }) => {
 			feed = onSamples;
 			return { stop: () => {} };
 		});

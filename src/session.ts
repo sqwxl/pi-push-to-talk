@@ -4,11 +4,12 @@
  * The region is created on key press and frozen on release. Nothing outside it
  * is ever rewritten, so the rest of the buffer stays the user's.
  */
-import { openMicrophone, type Microphone } from "./capture.ts";
+import type { Microphone } from "./capture.ts";
 import { LISTENING_BLINK_MS, MIN_PHRASE_MS, MIN_PHRASE_RMS, PARTIAL_INTERVAL_MS, msToSamples } from "./config.ts";
 import { trace } from "./debug.ts";
 import { commitPartial, joinText, regionCursorOffset, renderRegion, withPartial, type Region } from "./region.ts";
 import { Segmenter, rmsOf } from "./segmenter.ts";
+import { openAudioSource, type OpenMic } from "./source.ts";
 import type { Stt } from "./stt.ts";
 import { cleanTranscript } from "./transcript.ts";
 
@@ -26,7 +27,7 @@ const MIN_PHRASE_SAMPLES = msToSamples(MIN_PHRASE_MS);
 export class DictationSession {
 	private readonly stt: Promise<Stt>;
 	private readonly ui: SessionUi;
-	private readonly openMic: typeof openMicrophone;
+	private readonly openMic: OpenMic;
 	private region: Region | undefined;
 	private mic: Microphone | undefined;
 	private segmenter = new Segmenter();
@@ -42,7 +43,7 @@ export class DictationSession {
 	/** Characters committed during this session, to tell a real result from silence. */
 	private committedChars = 0;
 
-	constructor(stt: Stt | Promise<Stt>, ui: SessionUi, openMic: typeof openMicrophone = openMicrophone) {
+	constructor(stt: Stt | Promise<Stt>, ui: SessionUi, openMic: OpenMic = openAudioSource) {
 		this.stt = Promise.resolve(stt);
 		this.ui = ui;
 		this.openMic = openMic;
@@ -66,10 +67,11 @@ export class DictationSession {
 		this.startListening();
 
 		try {
-			this.mic = await this.openMic(
-				(samples) => this.onSamples(samples),
-				(error) => this.fail(error),
-			);
+			this.mic = await this.openMic({
+				onSamples: (samples) => this.onSamples(samples),
+				onError: (error) => this.fail(error),
+				notify: (message, level) => this.ui.notify(message, level),
+			});
 		} catch (error) {
 			this.stopped = true;
 			this.stopListening();

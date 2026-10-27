@@ -33,9 +33,43 @@ Whisper base is downloaded once, about 198 MB, into `~/.pi/models/whisper-base/`
 
 Extraction uses the system `tar` with bzip2 support, which is present on macOS, Linux, and Windows 10+.
 
+## Remote machine
+
+pi can run on a host with no microphone. Capture then happens on the machine where your terminal runs, and the audio travels over SSH.
+
+On the machine with the microphone:
+
+```bash
+node scripts/mic-stream.mjs --port 47777
+ssh -N -R 127.0.0.1:47777:127.0.0.1:47777 user@remote
+```
+
+On the remote host:
+
+```bash
+PI_DICTATION_AUDIO=127.0.0.1:47777 pi
+```
+
+- The helper listens on loopback only, and the SSH forward binds loopback on the remote. Nothing is exposed to the network.
+- Only the SSH connection carries the audio. One recorder starts per hold and stops when the hold ends.
+- If the stream is unreachable, dictation falls back to the remote host's own microphone and shows a warning.
+- SSH compression is unnecessary; the stream is about 32 KB/s.
+
+Port rules:
+
+- Pick a port free on both ends.
+- On Fedora, SELinux lets `sshd` listen only on 32768-60999. A lower port fails with `remote port forwarding failed`.
+- Forward to the same port on both ends to keep the command easy to read.
+
+Recorder requirements:
+
+- macOS: `ffmpeg` (`brew install ffmpeg`), plus microphone permission for the terminal.
+- Linux: `parec` from PipeWire or PulseAudio.
+- Any local user on the remote host can connect to the forwarded port and record the client microphone. Use a host you trust.
+
 ## How it works
 
-- Capture: `decibri` reads the microphone in process, resampling to 16 kHz mono.
+- Capture: `decibri` reads the microphone in process, resampling to 16 kHz mono. With `PI_DICTATION_AUDIO` set, the same pipeline reads 16 kHz mono PCM from a socket instead.
 - Recognition: `sherpa-onnx-node` runs Whisper base int8 on the CPU, four threads.
 - Segmentation: a phrase closes after 2.5 s of silence or 12 s of unbroken speech; the cut lands in the quietest part of the last 800 ms, not mid-syllable.
 - Editor: the extension owns the prompt editor, but only to write text. Keys are handled on the raw terminal path and only while the main editor has focus, so dialogs and nested editors keep working.
@@ -43,7 +77,7 @@ Extraction uses the system `tar` with bzip2 support, which is present on macOS, 
 ## Requirements
 
 - pi with extension support
-- A microphone the terminal may use
+- A microphone the terminal may use, or a remote audio stream
 - macOS, Linux, or Windows, x64 or arm64
 
 ## Known limits
@@ -53,6 +87,7 @@ Extraction uses the system `tar` with bzip2 support, which is present on macOS, 
 - Brackets are stripped from transcripts, since Whisper emits them as sound captions. Dictating code with brackets is not supported.
 - The cursor is restored with simulated left-arrow presses, capped at 4,000 characters. Inserting near the start of a very long prompt can leave the cursor short of the dictation point.
 - Nested editors (dialogs) do not accept dictation, only normal typing.
+- If the terminal drops key releases, a second press stops dictation instead of the release. A re-press is recognised as a new key after 250 ms without a space event, so a keyboard whose auto-repeat is slower than that would stop early.
 
 ## Diagnostics
 

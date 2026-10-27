@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
-import { HOLD_MS } from "./config.ts";
+import { HOLD_MS, RELEASE_GAP_MS } from "./config.ts";
 
 type PiTui = typeof import("@earendil-works/pi-tui");
 
@@ -165,6 +165,63 @@ test("cancel while the model loads leaves no stray space", { skip }, async () =>
 
 		assert.equal(sessions.length, 0);
 		assert.equal(editor.text, "");
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("a lost release does not leave the microphone open", { skip }, async () => {
+	const { editor, hold, sessions } = harness();
+	try {
+		press(hold, editor);
+		mock.timers.tick(HOLD_MS + 10);
+		await flush();
+		assert.equal(sessions.length, 1);
+
+		// The terminal dropped the release; the next press is a new key.
+		mock.timers.tick(RELEASE_GAP_MS + 50);
+		hold.handle(PRESS);
+		await flush();
+
+		assert.equal(sessions[0]?.stopped, true, "the lost release must close the session");
+		assert.equal(editor.text, "", "the stopping press is not typed");
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("held-key repeats keep dictating", { skip }, async () => {
+	const { editor, hold, sessions } = harness();
+	try {
+		press(hold, editor);
+		for (let i = 0; i < 40; i++) {
+			mock.timers.tick(30);
+			hold.handle(PRESS);
+		}
+		await flush();
+
+		assert.equal(sessions.length, 1);
+		assert.equal(sessions[0]?.stopped, false, "repeats are not a new press");
+		hold.handle(RELEASE);
+		assert.equal(sessions[0]?.stopped, true);
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("a slow first repeat is not a new press", { skip }, async () => {
+	const { editor, hold, sessions } = harness();
+	try {
+		press(hold, editor);
+		// Some keyboards wait 250-660 ms before the first repeat.
+		mock.timers.tick(RELEASE_GAP_MS + 60);
+		hold.handle(PRESS);
+		mock.timers.tick(HOLD_MS);
+		await flush();
+
+		assert.equal(sessions.length, 1, "the hold still starts");
+		assert.equal(editor.text, "", "no stray space from the repeat");
+		hold.handle(RELEASE);
 	} finally {
 		mock.timers.reset();
 	}

@@ -33,6 +33,12 @@ export const MIN_PHRASE_RMS = 0.005;
 /** SPACE held this long starts dictating. */
 export const HOLD_MS = 350;
 
+/**
+ * A space press this long after the previous space event is a new press, not
+ * the auto-repeat of a held key. Used to recover a lost key release.
+ */
+export const RELEASE_GAP_MS = 250;
+
 /** The listening indicator alternates filled and empty at this interval. */
 export const LISTENING_BLINK_MS = 600;
 

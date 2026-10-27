@@ -1,0 +1,70 @@
+/** Verifies which capture source runs, and what happens when the stream is missing. */
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { Microphone } from "./capture.ts";
+import { AUDIO_ENV, openAudioSource } from "./source.ts";
+
+const mic: Microphone = { stop: () => {} };
+
+function handlers(notices: string[]) {
+	return {
+		onSamples: () => {},
+		onError: () => {},
+		notify: (message: string) => notices.push(message),
+	};
+}
+
+function openers(used: string[], fail = false) {
+	return {
+		openDevice: async () => {
+			used.push("device");
+			return mic;
+		},
+		openRemote: async (target: string) => {
+			used.push(`remote:${target}`);
+			if (fail) throw new Error("connect ECONNREFUSED");
+			return mic;
+		},
+	};
+}
+
+async function withTarget(value: string | undefined, run: () => Promise<void>): Promise<void> {
+	const previous = process.env[AUDIO_ENV];
+	if (value === undefined) delete process.env[AUDIO_ENV];
+	else process.env[AUDIO_ENV] = value;
+	try {
+		await run();
+	} finally {
+		if (previous === undefined) delete process.env[AUDIO_ENV];
+		else process.env[AUDIO_ENV] = previous;
+	}
+}
+
+test("no setting opens the local device", async () => {
+	const used: string[] = [];
+	await withTarget(undefined, async () => {
+		await openAudioSource(handlers([]), openers(used));
+	});
+	assert.deepEqual(used, ["device"]);
+});
+
+test("a setting opens the stream", async () => {
+	const used: string[] = [];
+	const notices: string[] = [];
+	await withTarget("127.0.0.1:47777", async () => {
+		assert.equal(await openAudioSource(handlers(notices), openers(used)), mic);
+	});
+	assert.deepEqual(used, ["remote:127.0.0.1:47777"]);
+	assert.deepEqual(notices, []);
+});
+
+test("an unreachable stream falls back to the device and says so", async () => {
+	const used: string[] = [];
+	const notices: string[] = [];
+	await withTarget("127.0.0.1:47777", async () => {
+		assert.equal(await openAudioSource(handlers(notices), openers(used, true)), mic);
+	});
+	assert.deepEqual(used, ["remote:127.0.0.1:47777", "device"]);
+	assert.equal(notices.length, 1);
+	assert.match(notices[0] ?? "", /using the local microphone/);
+});

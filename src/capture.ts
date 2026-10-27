@@ -7,6 +7,7 @@
  */
 import { createRequire } from "node:module";
 import { SAMPLE_RATE, msToSamples } from "./config.ts";
+import { int16ToFloat32 } from "./pcm.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -15,13 +16,6 @@ export interface Microphone {
 }
 
 const FALLBACK_RATES = [SAMPLE_RATE, 48000, 44100];
-
-function toFloat32(chunk: Buffer): Float32Array {
-	const count = Math.floor(chunk.length / 2);
-	const out = new Float32Array(count);
-	for (let i = 0; i < count; i++) out[i] = chunk.readInt16LE(i * 2) / 32768;
-	return out;
-}
 
 /** Linear resampler with phase carried across chunks. */
 function makeResampler(fromRate: number): (input: Float32Array) => Float32Array {
@@ -65,7 +59,7 @@ export async function openMicrophone(
 			const resample = makeResampler(rate);
 			let stopped = false;
 			mic.on("data", (chunk: Buffer) => {
-				const samples = resample(toFloat32(chunk));
+				const samples = resample(int16ToFloat32(chunk));
 				if (samples.length > 0) onSamples(samples);
 			});
 			mic.on("error", (error: Error) => {
