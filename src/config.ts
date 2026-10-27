@@ -34,6 +34,13 @@ export const MIN_PHRASE_RMS = 0.005;
 export const HOLD_MS = 350;
 
 /**
+ * Loopback port SSH forwards from the machine with the microphone. The helper
+ * on that machine records it, so dictation works on a host with no usable
+ * audio input.
+ */
+export const AUDIO_TARGET = "127.0.0.1:47777";
+
+/**
  * A space press this long after the previous space event is a new press, not
  * the auto-repeat of a held key. Used to recover a lost key release.
  */

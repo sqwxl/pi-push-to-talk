@@ -1,11 +1,15 @@
 /**
  * Chooses where audio comes from.
  *
- * `PI_DICTATION_AUDIO=host:port` reads the stream a helper serves over SSH.
- * When that stream is unreachable the local device is used instead, so a stray
- * setting never makes dictation unusable.
+ * The machine that runs the terminal usually owns the microphone, and pi often
+ * runs elsewhere. SSH can forward that machine's helper to a fixed loopback
+ * port on this host, so the default source tries the port first and falls back
+ * to the local device when nothing answers. `PI_DICTATION_AUDIO=host:port`
+ * overrides the address and warns instead of falling back silently.
  */
 import { openMicrophone, type Microphone } from "./capture.ts";
+import { AUDIO_TARGET } from "./config.ts";
+import { trace } from "./debug.ts";
 import { openStream } from "./stream.ts";
 
 export const AUDIO_ENV = "PI_DICTATION_AUDIO";
@@ -30,12 +34,15 @@ export async function openAudioSource(
 	source: AudioSource,
 	openers: Openers = defaultOpeners,
 ): Promise<Microphone> {
-	const target = process.env[AUDIO_ENV]?.trim();
-	if (target) {
-		try {
-			return await openers.openRemote(target, source.onSamples, source.onError);
-		} catch (error) {
-			const reason = error instanceof Error ? error.message : String(error);
+	const configured = process.env[AUDIO_ENV]?.trim();
+	const target = configured || AUDIO_TARGET;
+	try {
+		return await openers.openRemote(target, source.onSamples, source.onError);
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		trace(`audio stream ${target} unavailable (${reason}); using the local microphone`);
+		// With no setting, a closed port is the normal case on a local machine.
+		if (configured) {
 			source.notify(
 				`Dictation: audio stream ${target} unavailable (${reason}); using the local microphone`,
 				"warning",

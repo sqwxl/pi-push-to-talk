@@ -40,12 +40,14 @@ async function withTarget(value: string | undefined, run: () => Promise<void>): 
 	}
 }
 
-test("no setting opens the local device", async () => {
+test("no setting tries the forward, then the device, without a warning", async () => {
 	const used: string[] = [];
+	const notices: string[] = [];
 	await withTarget(undefined, async () => {
-		await openAudioSource(handlers([]), openers(used));
+		await openAudioSource(handlers(notices), openers(used, true));
 	});
-	assert.deepEqual(used, ["device"]);
+	assert.deepEqual(used, ["remote:127.0.0.1:47777", "device"]);
+	assert.deepEqual(notices, []);
 });
 
 test("a setting opens the stream", async () => {
@@ -56,6 +58,14 @@ test("a setting opens the stream", async () => {
 	});
 	assert.deepEqual(used, ["remote:127.0.0.1:47777"]);
 	assert.deepEqual(notices, []);
+});
+
+test("no setting prefers the forward when it answers", async () => {
+	const used: string[] = [];
+	await withTarget(undefined, async () => {
+		assert.equal(await openAudioSource(handlers([]), openers(used)), mic);
+	});
+	assert.deepEqual(used, ["remote:127.0.0.1:47777"]);
 });
 
 test("an unreachable stream falls back to the device and says so", async () => {

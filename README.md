@@ -35,41 +35,55 @@ Extraction uses the system `tar` with bzip2 support, which is present on macOS, 
 
 ## Remote machine
 
-pi can run on a host with no microphone. Capture then happens on the machine where your terminal runs, and the audio travels over SSH.
+pi can run on a host with no microphone. The machine where your terminal runs records, and SSH carries the audio to pi.
 
-On the machine with the microphone:
+Add this to `~/.ssh/config` on the machine with the microphone:
 
-```bash
-node scripts/mic-stream.mjs --port 47777
-ssh -N -R 127.0.0.1:47777:127.0.0.1:47777 user@remote
+```sshconfig
+Host bluefin.local
+  RemoteForward 127.0.0.1:47777 127.0.0.1:17777
+  PermitLocalCommand yes
+  LocalCommand sh -c 'nohup "$HOME/.local/bin/pi-mic-stream" >/dev/null 2>&1 &'
 ```
 
-On the remote host:
+Each connection to that host then starts the helper on loopback and forwards it to the host. pi tries `127.0.0.1:47777` on every hold, so there is nothing to start and no setting to remember. Without the helper the port is closed and pi records from the host's own microphone.
 
-```bash
-PI_DICTATION_AUDIO=127.0.0.1:47777 pi
+The helper is a short shell script at `~/.local/bin/pi-mic-stream` on the machine with the microphone. It listens on loopback and runs one recorder per connection, so the microphone is open only while pi records. Later SSH sessions find the port taken and leave the listener alone:
+
+```sh
+#!/bin/sh
+set -eu
+port=17777
+if command -v parec >/dev/null 2>&1; then
+	recorder='parec --raw --rate=16000 --channels=1 --format=s16le --latency-msec=20'
+else
+	recorder='ffmpeg -hide_banner -loglevel error -f avfoundation -i :0 -ar 16000 -ac 1 -f s16le -'
+fi
+command -v socat >/dev/null 2>&1 || exit 0
+exec socat TCP-LISTEN:"${port}",bind=127.0.0.1,reuseaddr,fork EXEC:"${recorder}" >/dev/null 2>&1
 ```
 
-- The helper listens on loopback only, and the SSH forward binds loopback on the remote. Nothing is exposed to the network.
-- Only the SSH connection carries the audio. One recorder starts per hold and stops when the hold ends.
-- If the stream is unreachable, dictation falls back to the remote host's own microphone and shows a warning.
-- SSH compression is unnecessary; the stream is about 32 KB/s.
+Requirements on the machine with the microphone:
 
-Port rules:
+- `socat`
+- `parec` (Linux) or `ffmpeg` (macOS), plus microphone permission for the terminal
 
-- Pick a port free on both ends.
-- On Fedora, SELinux lets `sshd` listen only on 32768-60999. A lower port fails with `remote port forwarding failed`.
-- Forward to the same port on both ends to keep the command easy to read.
+Notes:
 
-Recorder requirements:
-
-- macOS: `ffmpeg` (`brew install ffmpeg`), plus microphone permission for the terminal.
-- Linux: `parec` from PipeWire or PulseAudio.
+- The helper listens on loopback only, and the forward binds loopback on the remote host. Nothing is exposed to the network.
+- One recorder starts per hold, so the microphone is open only while you speak.
+- The stream is 16 kHz mono, about 32 KB/s. SSH compression does not help it.
+- `PI_DICTATION_AUDIO=host:port` overrides the address and warns, instead of falling back silently, when the stream is missing.
 - Any local user on the remote host can connect to the forwarded port and record the client microphone. Use a host you trust.
+
+Port choices:
+
+- 47777 must be free on the remote host, and its sshd must allow forwarding to it. On Fedora, SELinux lets sshd listen only on 32768-60999.
+- Two clients connected to the same host cannot both forward 47777. The second connection prints `remote port forwarding failed` and keeps working; pi records from the first client.
 
 ## How it works
 
-- Capture: `decibri` reads the microphone in process, resampling to 16 kHz mono. With `PI_DICTATION_AUDIO` set, the same pipeline reads 16 kHz mono PCM from a socket instead.
+- Capture: the local device through `decibri`, or 16 kHz mono PCM from `127.0.0.1:47777` when SSH forwards a microphone there.
 - Recognition: `sherpa-onnx-node` runs Whisper base int8 on the CPU, four threads.
 - Segmentation: a phrase closes after 2.5 s of silence or 12 s of unbroken speech; the cut lands in the quietest part of the last 800 ms, not mid-syllable.
 - Editor: the extension owns the prompt editor, but only to write text. Keys are handled on the raw terminal path and only while the main editor has focus, so dialogs and nested editors keep working.
