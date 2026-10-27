@@ -88,8 +88,32 @@ test("a stream that ends mid-dictation reports an error", async () => {
 	}
 });
 
-test("stopping does not report the closed stream as a failure", async () => {
+test("a forward that closes without audio rejects", async () => {
+	const server = await listen((socket) => socket.end());
+	try {
+		await assert.rejects(
+			openStream(`127.0.0.1:${port(server)}`, () => {}, () => {}),
+			/ended before any audio/,
+		);
+	} finally {
+		await close(server);
+	}
+});
+
+test("a silent connection rejects instead of pretending to record", async () => {
 	const server = await listen(() => {});
+	try {
+		await assert.rejects(
+			openStream(`127.0.0.1:${port(server)}`, () => {}, () => {}, 50),
+			/sent no samples/,
+		);
+	} finally {
+		await close(server);
+	}
+});
+
+test("stopping does not report the closed stream as a failure", async () => {
+	const server = await listen((socket) => socket.write(pcm(0.1)));
 	const errors: string[] = [];
 	try {
 		const mic = await openStream(`127.0.0.1:${port(server)}`, () => {}, (error) => errors.push(error.message));
