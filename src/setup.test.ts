@@ -17,6 +17,7 @@ test("the script installs the helper and the ssh entry", () => {
 	assert.match(script, /^#!\/bin\/sh\n/);
 	assert.ok(script.includes(HELPER.trimEnd()), "helper body is embedded verbatim");
 	assert.ok(script.includes("Host bluefin.local\n  RemoteForward 127.0.0.1:47777 127.0.0.1:17777\n"));
+	assert.ok(script.includes("\n  LogLevel ERROR\n"), "later connections would warn about the busy port");
 	assert.ok(script.includes('chmod +x "$HOME/.local/bin/pi-mic-stream"'));
 	assert.ok(script.includes("Include ~/.ssh/config.d/*"));
 	assert.equal(script.split("Host bluefin.local").length, 2, "one ssh entry");

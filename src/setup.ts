@@ -58,6 +58,8 @@ Host ${host}
   RemoteForward 127.0.0.1:47777 127.0.0.1:17777
   PermitLocalCommand yes
   LocalCommand sh -c 'nohup "$HOME/.local/bin/pi-mic-stream" >/dev/null 2>&1 &'
+  # Successful connections need no forwarding log; every later one would warn.
+  LogLevel ERROR
 CONFIG_EOF
 
 echo "Done. Reconnect to ${host}, then hold Space to dictate."

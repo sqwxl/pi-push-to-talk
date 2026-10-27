@@ -58,7 +58,11 @@ Host bluefin.local
   RemoteForward 127.0.0.1:47777 127.0.0.1:17777
   PermitLocalCommand yes
   LocalCommand sh -c 'nohup "$HOME/.local/bin/pi-mic-stream" >/dev/null 2>&1 &'
+  # Successful connections need no forwarding log; every later one would warn.
+  LogLevel ERROR
 ```
+
+`LogLevel ERROR` hides the `remote port forwarding failed` warning that every later connection to that host would otherwise print, because the port is already served.
 
 If the client config lives elsewhere, or you set machines up by hand, copy `scripts/pi-mic-stream` from this package and add the entry yourself. The script is safe to run again, and it keeps any SSH config already on that machine.
 
