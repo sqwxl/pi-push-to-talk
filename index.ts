@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DictationEditor } from "./src/editor.ts";
 import { SpaceHold } from "./src/hold.ts";
 import { ProbeEditor } from "./src/probe.ts";
+import { parseHost, writeSetup } from "./src/setup.ts";
 import { Stt } from "./src/stt.ts";
 
 type Ui = {
@@ -45,6 +46,30 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 		indicator: (state, filled) => {
 			const circle = filled ? (ui?.theme.fg("error", "●") ?? "●") : "○";
 			return `${circle} ${state === "loading" ? "loading model" : "listening"}`;
+		},
+	});
+
+	// The microphone is often on the machine running the terminal, not on this
+	// host. Point the user at the one-time setup when they want that.
+	pi.registerCommand("dictation-setup", {
+		description: "Dictate with the microphone on the machine you type on",
+		handler: async (args, ctx) => {
+			const host = parseHost(args);
+			if (!host) {
+				ctx.ui.notify("Usage: /dictation-setup <ssh-host>, for example /dictation-setup bluefin.local", "warning");
+				return;
+			}
+			try {
+				const line = await writeSetup(host);
+				pi.sendMessage({
+					customType: "dictation-setup",
+					content: `Run this once on the machine with the microphone, then reconnect to ${host}:\n\n\`\`\`sh\n${line}\n\`\`\`\n`,
+					display: true,
+				});
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				ctx.ui.notify(`Dictation: setup failed: ${message}`, "error");
+			}
 		},
 	});
 

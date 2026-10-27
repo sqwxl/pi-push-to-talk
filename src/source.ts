@@ -49,5 +49,11 @@ export async function openAudioSource(
 			);
 		}
 	}
-	return openers.openDevice(source.onSamples, source.onError);
+	try {
+		return await openers.openDevice(source.onSamples, source.onError);
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		// A host with no audio input is the case the remote setup exists for.
+		throw new Error(`${reason.replace(/\.$/, "")}. Run /dictation-setup to dictate with the computer you type on`);
+	}
 }

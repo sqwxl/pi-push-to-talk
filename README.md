@@ -35,9 +35,23 @@ Extraction uses the system `tar` with bzip2 support, which is present on macOS, 
 
 ## Remote machine
 
-pi can run on a host with no microphone. The machine where your terminal runs records, and SSH carries the audio to pi.
+pi can run on a host with no usable audio input. Dictation can then record on the machine running the terminal and send the audio over SSH.
 
-Add this to `~/.ssh/config` on the machine with the microphone:
+On the host running pi:
+
+```
+/dictation-setup bluefin.local
+```
+
+It writes a setup script there and shows the one line to run on the machine with the microphone:
+
+```sh
+scp bluefin.local:/tmp/pi-dictation-setup.sh /tmp/ && sh /tmp/pi-dictation-setup.sh
+```
+
+That script installs `~/.local/bin/pi-mic-stream` and adds one SSH entry. Every later connection to that host then starts a recorder on loopback and forwards it to `127.0.0.1:47777`, where pi looks on each hold. Nothing runs in the background between holds, and nothing needs a setting: when the port is closed, pi records from the host's own microphone.
+
+The entry the script writes:
 
 ```sshconfig
 Host bluefin.local
@@ -46,22 +60,7 @@ Host bluefin.local
   LocalCommand sh -c 'nohup "$HOME/.local/bin/pi-mic-stream" >/dev/null 2>&1 &'
 ```
 
-Each connection to that host then starts the helper on loopback and forwards it to the host. pi tries `127.0.0.1:47777` on every hold, so there is nothing to start and no setting to remember. Without the helper the port is closed and pi records from the host's own microphone.
-
-The helper is a short shell script at `~/.local/bin/pi-mic-stream` on the machine with the microphone. It listens on loopback and runs one recorder per connection, so the microphone is open only while pi records. Later SSH sessions find the port taken and leave the listener alone:
-
-```sh
-#!/bin/sh
-set -eu
-port=17777
-if command -v parec >/dev/null 2>&1; then
-	recorder='parec --raw --rate=16000 --channels=1 --format=s16le --latency-msec=20'
-else
-	recorder='ffmpeg -hide_banner -loglevel error -f avfoundation -i :0 -ar 16000 -ac 1 -f s16le -'
-fi
-command -v socat >/dev/null 2>&1 || exit 0
-exec socat TCP-LISTEN:"${port}",bind=127.0.0.1,reuseaddr,fork EXEC:"${recorder}" >/dev/null 2>&1
-```
+If the client config lives elsewhere, or you set machines up by hand, copy `scripts/pi-mic-stream` from this package and add the entry yourself. The script is safe to run again, and it keeps any SSH config already on that machine.
 
 Requirements on the machine with the microphone:
 
@@ -92,6 +91,7 @@ Port choices:
 
 - pi with extension support
 - A microphone the terminal may use, or a remote audio stream
+- `socat` and `parec` or `ffmpeg` on the machine with the microphone, for remote use
 - macOS, Linux, or Windows, x64 or arm64
 
 ## Known limits

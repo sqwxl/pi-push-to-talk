@@ -68,6 +68,24 @@ test("no setting prefers the forward when it answers", async () => {
 	assert.deepEqual(used, ["remote:127.0.0.1:47777"]);
 });
 
+test("a host with no microphone points at the setup command", async () => {
+	const used: string[] = [];
+	const failing = {
+		openDevice: async () => {
+			used.push("device");
+			throw new Error("ALSA function failed.");
+		},
+		openRemote: async () => {
+			used.push("remote");
+			throw new Error("connect ECONNREFUSED");
+		},
+	};
+	await withTarget(undefined, async () => {
+		await assert.rejects(openAudioSource(handlers([]), failing), /ALSA function failed\. Run \/dictation-setup to dictate/);
+	});
+	assert.deepEqual(used, ["remote", "device"]);
+});
+
 test("an unreachable stream falls back to the device and says so", async () => {
 	const used: string[] = [];
 	const notices: string[] = [];

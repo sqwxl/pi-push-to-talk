@@ -1,6 +1,6 @@
 {
   "name": "pi-push-to-talk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Hold space to dictate into pi's prompt, transcribed locally with Whisper.",
   "keywords": [
@@ -28,7 +28,7 @@
   "pi": {
     "extensions": ["./index.ts"]
   },
-  "files": ["index.ts", "src/**/*.ts", "!src/**/*.test.ts", "README.md", "LICENSE"],
+  "files": ["index.ts", "src/**/*.ts", "!src/**/*.test.ts", "scripts/**", "README.md", "LICENSE"],
   "dependencies": {
     "decibri": "^3.4.2",
     "sherpa-onnx-node": "^1.13.8"
