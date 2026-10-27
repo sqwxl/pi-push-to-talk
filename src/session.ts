@@ -75,7 +75,10 @@ export class DictationSession {
 		} catch (error) {
 			this.stopped = true;
 			this.stopListening();
-			this.ui.notify(`Dictation: microphone unavailable (${String(error)})`, "error");
+			this.ui.notify(
+				`Dictation: microphone unavailable (${error instanceof Error ? error.message : String(error)})`,
+				"error",
+			);
 			return;
 		}
 

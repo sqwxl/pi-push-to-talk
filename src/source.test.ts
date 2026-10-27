@@ -81,7 +81,7 @@ test("a host with no microphone points at the setup command", async () => {
 		},
 	};
 	await withTarget(undefined, async () => {
-		await assert.rejects(openAudioSource(handlers([]), failing), /ALSA function failed\. Run \/dictation-setup to dictate/);
+		await assert.rejects(openAudioSource(handlers([]), failing), /^Error: No microphone on this host\. Run \/dictation-setup/);
 	});
 	assert.deepEqual(used, ["remote", "device"]);
 });
@@ -91,6 +91,7 @@ test("a device that fails after opening still points at the setup command", asyn
 	const late = {
 		openDevice: async (_samples: unknown, onError: (error: Error) => void) => {
 			onError(new Error("ALSA function failed."));
+			onError(new Error("microphone stream ended"));
 			return mic;
 		},
 		openRemote: async () => {
@@ -107,8 +108,8 @@ test("a device that fails after opening still points at the setup command", asyn
 			late,
 		);
 	});
-	assert.equal(errors.length, 1);
-	assert.match(errors[0] ?? "", /ALSA function failed\. Run \/dictation-setup to dictate/);
+	assert.equal(errors.length, 1, "the failure is reported once");
+	assert.match(errors[0] ?? "", /No microphone on this host\. Run \/dictation-setup/);
 });
 
 test("an unreachable stream falls back to the device and says so", async () => {

@@ -31,10 +31,15 @@ export type OpenMic = (source: AudioSource, openers?: Openers) => Promise<Microp
 const defaultOpeners: Openers = { openDevice: openMicrophone, openRemote: openStream };
 
 /** Shown when neither the stream nor the local device can record. */
-const SETUP_HINT = " Run /dictation-setup to dictate with the computer you type on";
+const NO_MICROPHONE =
+	"No microphone on this host. Run /dictation-setup to dictate with the computer you type on";
 
-const withHint = (error: Error): Error =>
-	new Error(`${error.message.replace(/\.$/, "")}.${SETUP_HINT}`);
+const withHint = (error: Error): Error => {
+	// The backend error names ALSA or CoreAudio internals; keep it in the trace
+	// and show the one thing the user can act on.
+	trace(`audio source failed: ${error.message}`);
+	return new Error(NO_MICROPHONE);
+};
 
 export async function openAudioSource(
 	source: AudioSource,
@@ -58,7 +63,12 @@ export async function openAudioSource(
 	try {
 		// A host with no audio input resolves the device and then reports the
 		// failure asynchronously, so the hint belongs on its error, not on throw.
-		return await openers.openDevice(source.onSamples, (error) => source.onError(withHint(error)));
+		let reported = false;
+		return await openers.openDevice(source.onSamples, (error) => {
+			if (reported) return;
+			reported = true;
+			source.onError(withHint(error));
+		});
 	} catch (error) {
 		throw withHint(error instanceof Error ? error : new Error(String(error)));
 	}
