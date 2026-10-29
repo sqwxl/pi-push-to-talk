@@ -59,7 +59,7 @@ The entry the script writes, with the port it chose:
 Host bluefin.local
   RemoteForward 127.0.0.1:47778 127.0.0.1:17777
   PermitLocalCommand yes
-  LocalCommand sh -c 'nohup "$HOME/.local/bin/pi-mic-stream" 47778 >/dev/null 2>&1 &'
+  LocalCommand sh -c 'nohup "$HOME/.local/bin/pi-mic-stream" >/dev/null 2>&1 &'
   # Successful connections need no forwarding log; every later one would warn.
   LogLevel ERROR
 ```

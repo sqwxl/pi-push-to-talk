@@ -19,7 +19,7 @@ test("the script installs the helper and the ssh entry", () => {
 	assert.ok(script.includes("\n  RemoteForward 127.0.0.1:$port 127.0.0.1:17777\n"));
 	assert.ok(script.includes("\n  LogLevel ERROR\n"), "later connections would warn about the busy port");
 	assert.ok(script.includes("while [ \"$candidate\" -le 47792 ]"), "picks a port the host is not using");
-	assert.ok(script.includes("pi-mic-stream\" $port"), "the helper serves the chosen port");
+	assert.ok(script.includes("pi-mic-stream\" >/dev/null"), "the helper serves its own local port");
 	assert.ok(script.includes('chmod +x "$HOME/.local/bin/pi-mic-stream"'));
 	assert.ok(script.includes("Include ~/.ssh/config.d/*"));
 	assert.ok(script.includes('host="bluefin.local"'), "the host is written once");
