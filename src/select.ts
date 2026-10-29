@@ -10,6 +10,7 @@
  * spoken during the decision is lost.
  */
 import type { Microphone } from "./capture.ts";
+import { trace } from "./debug.ts";
 import { rmsOf } from "./segmenter.ts";
 
 /** Long enough to contain a syllable on any machine. */
@@ -151,6 +152,11 @@ export async function pickStream(
 	});
 
 	const winner = rank(entries)[0];
+	for (const entry of entries) {
+		trace(
+			`pick ${entry.target} peak=${entry.peak.toFixed(3)} median=${median(entry.levels).toFixed(3)} score=${score(entry).toFixed(2)}`,
+		);
+	}
 	for (const entry of entries) {
 		if (entry === winner) continue;
 		entry.buffering = false;
