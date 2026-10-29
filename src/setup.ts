@@ -45,7 +45,12 @@ host="${host}"
 missing=""
 command -v socat >/dev/null 2>&1 || missing="socat"
 if ! command -v parec >/dev/null 2>&1 && ! command -v ffmpeg >/dev/null 2>&1; then
-	missing="\${missing:+$missing }parec-or-ffmpeg"
+	missing="\${missing:+$missing, }parec or ffmpeg"
+fi
+if [ -n "$missing" ]; then
+	echo "setup: missing $missing" >&2
+	echo "setup: nothing was installed; no SSH config was changed" >&2
+	exit 1
 fi
 if [ -n "$missing" ]; then
 	echo "Missing on this machine: $missing"
@@ -106,8 +111,8 @@ case "$greeting" in
 pi-mic*)
 	;;
 *)
-	echo "The helper did not greet on 127.0.0.1:17777."
-	echo "Check that socat runs here, that a recorder works, and that this terminal may use the microphone."
+	echo "setup: the helper did not answer on 127.0.0.1:17777" >&2
+	echo "setup: check socat, the recorder, and microphone access for this terminal" >&2
 	exit 1
 	;;
 esac
