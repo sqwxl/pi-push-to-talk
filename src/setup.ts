@@ -40,6 +40,18 @@ set -eu
 
 host="${host}"
 
+# Nothing below works without these, and a missing tool leaves a port that
+# accepts connections with no audio behind it.
+missing=""
+command -v socat >/dev/null 2>&1 || missing="socat"
+if ! command -v parec >/dev/null 2>&1 && ! command -v ffmpeg >/dev/null 2>&1; then
+	missing="\${missing:+$missing }parec-or-ffmpeg"
+fi
+if [ -n "$missing" ]; then
+	echo "Missing on this machine: $missing"
+	exit 1
+fi
+
 # Take the first port this client can have to itself on that host.
 listening=$(ssh -o BatchMode=yes -o ClearAllForwardings=yes "$host" "ss -ltn 2>/dev/null" || true)
 port=""
@@ -84,7 +96,23 @@ Host $host
   LogLevel ERROR
 CONFIG_EOF
 
-echo "Done. Port $port on $host. Reconnect to $host, then hold Space to dictate."
+echo "Done. Port $port on $host."
+
+# Prove the pair works before the user waits for a hold to find out.
+"$HOME/.local/bin/pi-mic-stream" >/dev/null 2>&1 &
+sleep 0.5
+greeting=$(nc -w 2 127.0.0.1 17777 </dev/null 2>/dev/null | head -n 1 || true)
+case "$greeting" in
+pi-mic*)
+	;;
+*)
+	echo "The helper did not greet on 127.0.0.1:17777."
+	echo "Check that socat runs here, that a recorder works, and that this terminal may use the microphone."
+	exit 1
+	;;
+esac
+
+echo "Reconnect to $host, then hold Space to dictate."
 `;
 }
 
