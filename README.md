@@ -51,15 +51,15 @@ It writes a setup script there and shows the one line to run on the machine with
 scp bluefin.local:/tmp/pi-dictation-setup.sh /tmp/ && sh /tmp/pi-dictation-setup.sh
 ```
 
-That script installs `~/.local/bin/pi-mic-stream` and adds one SSH entry. Every later connection to that host then starts a recorder on loopback and forwards it to `127.0.0.1:47777`, where pi looks on each hold. Nothing runs in the background between holds, and nothing needs a setting: when the port is closed, pi records from the host's own microphone.
+That script installs `~/.local/bin/pi-mic-stream`, picks a port on that host which is still free, and adds one SSH entry for it. Every later connection then starts a recorder on loopback and forwards it. pi probes `47777`-`47792` when a hold starts, keeps the first port whose helper greets, and reports which machine records (`● listening via t14`). When no port answers, pi records from the host's own microphone.
 
-The entry the script writes:
+The entry the script writes, with the port it chose:
 
 ```sshconfig
 Host bluefin.local
-  RemoteForward 127.0.0.1:47777 127.0.0.1:17777
+  RemoteForward 127.0.0.1:47778 127.0.0.1:17777
   PermitLocalCommand yes
-  LocalCommand sh -c 'nohup "$HOME/.local/bin/pi-mic-stream" >/dev/null 2>&1 &'
+  LocalCommand sh -c 'nohup "$HOME/.local/bin/pi-mic-stream" 47778 >/dev/null 2>&1 &'
   # Successful connections need no forwarding log; every later one would warn.
   LogLevel ERROR
 ```
@@ -78,13 +78,15 @@ Notes:
 - The helper listens on loopback only, and the forward binds loopback on the remote host. Nothing is exposed to the network.
 - One recorder starts per hold, so the microphone is open only while you speak.
 - The stream is 16 kHz mono, about 32 KB/s. SSH compression does not help it.
-- `PI_DICTATION_AUDIO=host:port` overrides the address and warns, instead of falling back silently, when the stream is missing.
+- Each connection to a helper starts with one `pi-mic <host>` line: it names the machine, and it lets pi skip ports that a stale session or another machine answers.
+- `PI_DICTATION_AUDIO=host:port` overrides the search and warns, instead of falling back silently, when the stream is missing.
+- `/dictation-source` lists the machines whose microphones answer, and `/dictation-source t14` records from one of them. Without it, pi takes the first stream it finds, so a single connected machine needs nothing.
 - Any local user on the remote host can connect to the forwarded port and record the client microphone. Use a host you trust.
 
-Port choices:
+Ports:
 
-- 47777 must be free on the remote host, and its sshd must allow forwarding to it. On Fedora, SELinux lets sshd listen only on 32768-60999.
-- Two clients connected to the same host cannot both forward 47777. The second connection prints `remote port forwarding failed` and keeps working; pi records from the first client.
+- The range `47777`-`47792` is reserved for this. Each client takes a free one when it sets up, so two machines never claim the same port on the same host.
+- On Fedora, SELinux lets sshd listen only on 32768-60999, which the range is inside.
 
 ## How it works
 

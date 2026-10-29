@@ -1,14 +1,25 @@
 /**
  * Audio from a socket instead of a device.
  *
- * The machine with the microphone runs a helper that records it and serves
- * 16 kHz mono signed 16-bit little-endian PCM. SSH forwards the helper's port
- * to this process, so dictation works on a host whose own microphone is
- * unusable, including one with none at all.
+ * The machine with the microphone runs a helper that records it, starts each
+ * stream with a `pi-mic <host>` line, and then sends 16 kHz mono signed 16-bit
+ * little-endian PCM. SSH forwards the helper's port to this process, so
+ * dictation works on a host whose own microphone is unusable, including one
+ * with none at all. The greeting lets a caller skip ports that a stale SSH
+ * session or another machine answers, and it names the machine that records.
  */
 import net from "node:net";
 import type { Microphone } from "./capture.ts";
 import { int16ToFloat32 } from "./pcm.ts";
+
+/** Every failure a connected socket reports starts with this. */
+export const STREAM_FAILED = "audio stream ";
+
+/** How long a listener has to identify itself before it counts as absent. */
+const HELLO_MS = 1000;
+
+/** A greeting is one short line; anything longer is not a helper. */
+const HELLO_MAX = 128;
 
 /** Parses the `host:port` form accepted by `PI_DICTATION_AUDIO`. */
 export function parseTarget(target: string): { host: string; port: number } {
@@ -19,22 +30,19 @@ export function parseTarget(target: string): { host: string; port: number } {
 	return { host: (match[1] ?? "").replace(/^\[|\]$/g, ""), port };
 }
 
-/** A forward can accept a connection and close it at once when no helper runs. */
-const FIRST_SAMPLE_MS = 2000;
-
 export function openStream(
 	target: string,
 	onSamples: (samples: Float32Array) => void,
 	onError: (error: Error) => void,
-	firstSampleMs = FIRST_SAMPLE_MS,
+	helloMs = HELLO_MS,
 ): Promise<Microphone> {
 	const { host, port } = parseTarget(target);
 	const socket = net.connect({ host, port });
 	let opened = false;
 	let stopped = false;
 	let reported = false;
-	/** TCP may split a sample across chunks; the odd byte waits for the next one. */
-	let carry = Buffer.alloc(0);
+	/** Before the greeting: the line so far. After it: a sample split across chunks. */
+	let buffer = Buffer.alloc(0);
 
 	return new Promise((resolve, reject) => {
 		let timer: NodeJS.Timeout | undefined;
@@ -44,14 +52,22 @@ export function openStream(
 			onError(error);
 		};
 
-		// A listening port proves nothing: sshd keeps the forward open after its
-		// client is gone, and a connection to it closes without a single sample.
-		// Only real audio counts as an open stream.
-		const open = (): void => {
-			if (opened || stopped) return;
+		const fail = (message: string): void => {
+			clearTimeout(timer);
+			socket.destroy();
+			reject(new Error(`${STREAM_FAILED}${message}`));
+		};
+
+		const greet = (line: string): void => {
+			const match = /^pi-mic (\S+)$/.exec(line.trim());
+			if (!match) {
+				fail("sent no helper greeting");
+				return;
+			}
 			opened = true;
 			clearTimeout(timer);
 			resolve({
+				client: match[1],
 				stop: () => {
 					stopped = true;
 					socket.destroy();
@@ -59,25 +75,39 @@ export function openStream(
 			});
 		};
 
+		const samples = (chunk: Buffer): void => {
+			const joined = buffer.length > 0 ? Buffer.concat([buffer, chunk]) : chunk;
+			const even = joined.length - (joined.length % 2);
+			buffer = joined.subarray(even);
+			if (even > 0) onSamples(int16ToFloat32(joined.subarray(0, even)));
+		};
+
 		socket.once("connect", () => {
-			timer = setTimeout(() => {
-				socket.destroy();
-				reject(new Error("audio stream sent no samples"));
-			}, firstSampleMs);
+			timer = setTimeout(() => fail("did not identify itself"), helloMs);
 		});
 
 		socket.on("data", (chunk: Buffer) => {
-			open();
-			const buffer = carry.length > 0 ? Buffer.concat([carry, chunk]) : chunk;
-			const even = buffer.length - (buffer.length % 2);
-			carry = buffer.subarray(even);
-			if (even > 0) onSamples(int16ToFloat32(buffer.subarray(0, even)));
+			if (opened) {
+				samples(chunk);
+				return;
+			}
+			buffer = buffer.length > 0 ? Buffer.concat([buffer, chunk]) : chunk;
+			const end = buffer.indexOf(0x0a);
+			if (end === -1) {
+				if (buffer.length > HELLO_MAX) fail("sent no helper greeting");
+				return;
+			}
+			const line = buffer.subarray(0, end).toString("utf8");
+			const rest = buffer.subarray(end + 1);
+			buffer = Buffer.alloc(0);
+			greet(line);
+			if (opened && rest.length > 0) samples(rest);
 		});
-
 		socket.once("error", (error: Error) => {
+			clearTimeout(timer);
 			if (!opened) {
-				clearTimeout(timer);
-				reject(error);
+				// A refusal never connected; anything else failed after connecting.
+				reject(new Error(error.message.startsWith("connect ") ? error.message : `${STREAM_FAILED}failed: ${error.message}`));
 				return;
 			}
 			report(error);
@@ -87,8 +117,7 @@ export function openStream(
 		for (const event of ["end", "close"] as const) {
 			socket.once(event, () => {
 				if (!opened) {
-					clearTimeout(timer);
-					reject(new Error("audio stream ended before any audio"));
+					fail("closed before its greeting");
 					return;
 				}
 				report(new Error("audio stream ended"));

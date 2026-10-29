@@ -2,9 +2,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Microphone } from "./capture.ts";
-import { AUDIO_ENV, openAudioSource } from "./source.ts";
+import { AUDIO_PORTS } from "./config.ts";
+import { AUDIO_ENV, listAudioSources, openAudioSource, pinAudioSource, resetAudioSearch } from "./source.ts";
 
-const mic: Microphone = { stop: () => {} };
+const mic: Microphone = { stop: () => {}, client: "t14" };
+const range = AUDIO_PORTS.map((port) => `remote:127.0.0.1:${port}`);
 
 function handlers(notices: string[]) {
 	return {
@@ -30,37 +32,29 @@ function openers(used: string[], fail = false) {
 
 async function withTarget(value: string | undefined, run: () => Promise<void>): Promise<void> {
 	const previous = process.env[AUDIO_ENV];
+	resetAudioSearch();
 	if (value === undefined) delete process.env[AUDIO_ENV];
 	else process.env[AUDIO_ENV] = value;
 	try {
 		await run();
 	} finally {
+		resetAudioSearch();
 		if (previous === undefined) delete process.env[AUDIO_ENV];
 		else process.env[AUDIO_ENV] = previous;
 	}
 }
 
-test("no setting tries the forward, then the device, without a warning", async () => {
+test("no stream anywhere probes the whole range, then the device, silently", async () => {
 	const used: string[] = [];
 	const notices: string[] = [];
 	await withTarget(undefined, async () => {
 		await openAudioSource(handlers(notices), openers(used, true));
 	});
-	assert.deepEqual(used, ["remote:127.0.0.1:47777", "device"]);
+	assert.deepEqual(used, [...range, "device"]);
 	assert.deepEqual(notices, []);
 });
 
-test("a setting opens the stream", async () => {
-	const used: string[] = [];
-	const notices: string[] = [];
-	await withTarget("127.0.0.1:47777", async () => {
-		assert.equal(await openAudioSource(handlers(notices), openers(used)), mic);
-	});
-	assert.deepEqual(used, ["remote:127.0.0.1:47777"]);
-	assert.deepEqual(notices, []);
-});
-
-test("no setting prefers the forward when it answers", async () => {
+test("the first port that answers wins", async () => {
 	const used: string[] = [];
 	await withTarget(undefined, async () => {
 		assert.equal(await openAudioSource(handlers([]), openers(used)), mic);
@@ -68,25 +62,92 @@ test("no setting prefers the forward when it answers", async () => {
 	assert.deepEqual(used, ["remote:127.0.0.1:47777"]);
 });
 
-test("a host with no microphone points at the setup command", async () => {
+test("a dead forward is skipped for the next port", async () => {
 	const used: string[] = [];
+	const mixed = {
+		openDevice: async () => mic,
+		openRemote: async (target: string) => {
+			used.push(target);
+			if (target === "127.0.0.1:47777") throw new Error("audio stream did not identify itself");
+			return mic;
+		},
+	};
+	await withTarget(undefined, async () => {
+		assert.equal(await openAudioSource(handlers([]), mixed), mic);
+	});
+	assert.deepEqual(used, ["127.0.0.1:47777", "127.0.0.1:47778"]);
+});
+
+test("a setting opens exactly that stream", async () => {
+	const used: string[] = [];
+	const notices: string[] = [];
+	await withTarget("127.0.0.1:50001", async () => {
+		assert.equal(await openAudioSource(handlers(notices), openers(used)), mic);
+	});
+	assert.deepEqual(used, ["remote:127.0.0.1:50001"]);
+	assert.deepEqual(notices, []);
+});
+
+test("a failing setting falls back to the device and says so", async () => {
+	const used: string[] = [];
+	const notices: string[] = [];
+	await withTarget("127.0.0.1:50001", async () => {
+		assert.equal(await openAudioSource(handlers(notices), openers(used, true)), mic);
+	});
+	assert.deepEqual(used, ["remote:127.0.0.1:50001", "device"]);
+	assert.equal(notices.length, 1);
+	assert.match(notices[0] ?? "", /using the local microphone/);
+});
+
+test("only streams that greet are listed", async () => {
+	const fake = {
+		openRemote: async (target: string) => {
+			if (target !== "127.0.0.1:47779") throw new Error("audio stream did not identify itself");
+			return mic;
+		},
+	};
+	const streams = await listAudioSources(fake);
+	assert.deepEqual(streams, [{ target: "127.0.0.1:47779", client: "t14" }]);
+});
+
+test("a pinned stream is tried before the rest", async () => {
+	const used: string[] = [];
+	await withTarget(undefined, async () => {
+		pinAudioSource("127.0.0.1:47785");
+		await openAudioSource(handlers([]), openers(used));
+	});
+	assert.deepEqual(used, ["remote:127.0.0.1:47785"]);
+});
+
+test("a host with no microphone points at the setup command", async () => {
 	const failing = {
 		openDevice: async () => {
-			used.push("device");
 			throw new Error("ALSA function failed.");
 		},
 		openRemote: async () => {
-			used.push("remote");
 			throw new Error("connect ECONNREFUSED");
 		},
 	};
 	await withTarget(undefined, async () => {
 		await assert.rejects(openAudioSource(handlers([]), failing), /^Error: No microphone on this host\. Run \/dictation-setup/);
 	});
-	assert.deepEqual(used, ["remote", "device"]);
 });
 
-test("a device that fails after opening still points at the setup command", async () => {
+test("a forward with nothing behind it asks for a reconnect, not a setup", async () => {
+	const stale = {
+		openDevice: async () => {
+			throw new Error("ALSA function failed.");
+		},
+		openRemote: async () => {
+			throw new Error("audio stream sent no helper greeting");
+		},
+	};
+	await withTarget(undefined, async () => {
+		await assert.rejects(openAudioSource(handlers([]), stale), /forwarded microphone port answered but no helper/);
+	});
+});
+
+test("a device that fails after opening still carries the message", async () => {
 	const errors: string[] = [];
 	const late = {
 		openDevice: async (_samples: unknown, onError: (error: Error) => void) => {
@@ -100,25 +161,10 @@ test("a device that fails after opening still points at the setup command", asyn
 	};
 	await withTarget(undefined, async () => {
 		await openAudioSource(
-			{
-				onSamples: () => {},
-				onError: (error) => errors.push(error.message),
-				notify: () => {},
-			},
+			{ onSamples: () => {}, onError: (error) => errors.push(error.message), notify: () => {} },
 			late,
 		);
 	});
 	assert.equal(errors.length, 1, "the failure is reported once");
 	assert.match(errors[0] ?? "", /No microphone on this host\. Run \/dictation-setup <ssh-host>/);
-});
-
-test("an unreachable stream falls back to the device and says so", async () => {
-	const used: string[] = [];
-	const notices: string[] = [];
-	await withTarget("127.0.0.1:47777", async () => {
-		assert.equal(await openAudioSource(handlers(notices), openers(used, true)), mic);
-	});
-	assert.deepEqual(used, ["remote:127.0.0.1:47777", "device"]);
-	assert.equal(notices.length, 1);
-	assert.match(notices[0] ?? "", /using the local microphone/);
 });

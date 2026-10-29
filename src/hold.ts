@@ -20,7 +20,7 @@ export type HoldDeps = {
 	notify: (message: string, level: "info" | "warning" | "error") => void;
 	status: (text: string | undefined) => void;
 	/** Indicator text for a blink phase, already coloured. */
-	indicator: (state: "loading" | "listening", filled: boolean) => string;
+	indicator: (state: "loading" | "listening", filled: boolean, client?: string) => string;
 	/** Test seam; production uses DictationSession. */
 	createSession?: (stt: Stt | Promise<Stt>, ui: SessionUi) => DictationSession;
 };
@@ -173,7 +173,7 @@ export class SpaceHold {
 			const ui: SessionUi = {
 				write: (text, cursorOffset, partialLength) => editor.writeAtCursor(text, cursorOffset, partialLength),
 				status: (text) => this.deps.status(text),
-				indicator: (state, filled) => this.deps.indicator(state, filled),
+				indicator: (state, filled, client) => this.deps.indicator(state, filled, client),
 				notify: (message, level) => this.deps.notify(message, level),
 			};
 			const create = this.deps.createSession ?? ((engine, sessionUi) => new DictationSession(engine, sessionUi));

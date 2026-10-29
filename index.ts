@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DictationEditor } from "./src/editor.ts";
 import { SpaceHold } from "./src/hold.ts";
 import { ProbeEditor } from "./src/probe.ts";
+import { listAudioSources, pinAudioSource } from "./src/source.ts";
 import { parseHost, writeSetup } from "./src/setup.ts";
 import { Stt } from "./src/stt.ts";
 
@@ -43,9 +44,10 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 		getStt,
 		notify: (message, level) => ui?.notify(message, level),
 		status: (text) => ui?.setStatus("dictation", text),
-		indicator: (state, filled) => {
+		indicator: (state, filled, client) => {
 			const circle = filled ? (ui?.theme.fg("error", "●") ?? "●") : "○";
-			return `${circle} ${state === "loading" ? "loading model" : "listening"}`;
+			if (state === "loading") return `${circle} loading model`;
+			return client ? `${circle} listening via ${client}` : `${circle} listening`;
 		},
 	});
 
@@ -73,6 +75,33 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 				const message = error instanceof Error ? error.message : String(error);
 				ctx.ui.notify(`Dictation: setup failed: ${message}`, "error");
 			}
+		},
+	});
+
+	pi.registerCommand("dictation-source", {
+		description: "List reachable microphones, or record from one of them",
+		handler: async (args, ctx) => {
+			const wanted = args.trim();
+			const streams = await listAudioSources();
+			if (!wanted) {
+				if (streams.length === 0) {
+					ctx.ui.notify("Dictation: no microphone stream is reachable", "warning");
+					return;
+				}
+				const names = streams.map((stream) => stream.client).join(", ");
+				ctx.ui.notify(`Dictation: recording from the first of ${names}; pick with /dictation-source <name>`, "info");
+				return;
+			}
+			const match =
+				streams.find((stream) => stream.client === wanted) ??
+				streams.find((stream) => stream.target === wanted) ??
+				streams.find((stream) => stream.target.endsWith(`:${wanted}`));
+			if (!match) {
+				ctx.ui.notify(`Dictation: no microphone stream named ${wanted}`, "warning");
+				return;
+			}
+			pinAudioSource(match.target);
+			ctx.ui.notify(`Dictation: recording from ${match.client}`, "info");
 		},
 	});
 

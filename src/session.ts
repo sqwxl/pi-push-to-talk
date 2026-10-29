@@ -18,7 +18,7 @@ export type SessionUi = {
 	write(text: string, cursorOffset: number, partialLength: number): void;
 	status(text: string | undefined): void;
 	/** Indicator text for a blink phase, already coloured. */
-	indicator(state: "loading" | "listening", filled: boolean): string;
+	indicator(state: "loading" | "listening", filled: boolean, client?: string): string;
 	notify(message: string, level: "info" | "warning" | "error"): void;
 };
 
@@ -42,6 +42,8 @@ export class DictationSession {
 	private stopped = true;
 	/** Characters committed during this session, to tell a real result from silence. */
 	private committedChars = 0;
+	/** Machine recording this session, when the audio comes over a forward. */
+	private client: string | undefined;
 
 	constructor(stt: Stt | Promise<Stt>, ui: SessionUi, openMic: OpenMic = openAudioSource) {
 		this.stt = Promise.resolve(stt);
@@ -89,6 +91,9 @@ export class DictationSession {
 			return;
 		}
 
+		this.client = this.mic.client;
+		this.writeListening();
+
 		this.timer = setInterval(() => this.track(this.preview()), PARTIAL_INTERVAL_MS);
 	}
 
@@ -110,6 +115,7 @@ export class DictationSession {
 		this.clearTimer();
 		this.mic?.stop();
 		this.mic = undefined;
+		this.client = undefined;
 
 		const tail = this.segmenter.open();
 		this.segmenter.reset();
@@ -226,7 +232,7 @@ export class DictationSession {
 	}
 
 	private writeListening(): void {
-		this.ui.status(this.ui.indicator(this.modelReady ? "listening" : "loading", this.listeningFilled));
+		this.ui.status(this.ui.indicator(this.modelReady ? "listening" : "loading", this.listeningFilled, this.client));
 	}
 
 	private stopListening(): void {

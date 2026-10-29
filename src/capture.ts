@@ -13,6 +13,8 @@ const require = createRequire(import.meta.url);
 
 export interface Microphone {
 	stop(): void;
+	/** Machine that records, set when the audio arrives over a forwarded socket. */
+	client?: string;
 }
 
 const FALLBACK_RATES = [SAMPLE_RATE, 48000, 44100];

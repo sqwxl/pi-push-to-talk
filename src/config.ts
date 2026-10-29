@@ -34,11 +34,11 @@ export const MIN_PHRASE_RMS = 0.005;
 export const HOLD_MS = 350;
 
 /**
- * Loopback port SSH forwards from the machine with the microphone. The helper
- * on that machine records it, so dictation works on a host with no usable
- * audio input.
+ * Loopback ports a client may forward its microphone helper to. Each client
+ * picks a free one when it sets up, so two machines never claim the same port
+ * on the same host.
  */
-export const AUDIO_TARGET = "127.0.0.1:47777";
+export const AUDIO_PORTS = Array.from({ length: 16 }, (_, index) => 47777 + index);
 
 /**
  * A space press this long after the previous space event is a new press, not
