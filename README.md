@@ -51,7 +51,7 @@ It writes a setup script there and shows the one line to run on the machine with
 scp bluefin.local:/tmp/pi-dictation-setup.sh /tmp/ && sh /tmp/pi-dictation-setup.sh
 ```
 
-That script installs `~/.local/bin/pi-mic-stream`, picks a port on that host which is still free, and adds one SSH entry for it. Every later connection then starts a recorder on loopback and forwards it. pi probes `47777`-`47792` when a hold starts, keeps the first port whose helper greets, and reports which machine records (`● listening via t14`). When no port answers, pi records from the host's own microphone.
+That script installs `~/.local/bin/pi-mic-stream`, picks a port on that host which is still free, and adds one SSH entry for it. Every later connection then starts a recorder on loopback and forwards it. pi probes `47777`-`47792` when a hold starts and opens every port whose helper greets. With one machine connected it uses that stream at once. With several, it buffers a short window and keeps the stream where speech rose furthest above its own noise floor — a quiet laptop wins over a humming desktop, because the comparison is relative. The chosen machine is shown as `● listening via t14`. When no port answers, pi records from the host's own microphone.
 
 The entry the script writes, with the port it chose:
 
@@ -78,11 +78,11 @@ The setup script stops and names whichever of these is missing, then starts the 
 Notes:
 
 - The helper listens on loopback only, and the forward binds loopback on the remote host. Nothing is exposed to the network.
-- One recorder starts per hold, so the microphone is open only while you speak.
+- One recorder starts per hold, so the microphone is open only while you speak. With two machines connected, both record for the first moments of a hold until one is dropped.
 - The stream is 16 kHz mono, about 32 KB/s. SSH compression does not help it.
 - Each connection to a helper starts with one `pi-mic <host>` line: it names the machine, and it lets pi skip ports that a stale session or another machine answers.
 - `PI_DICTATION_AUDIO=host:port` overrides the search and warns, instead of falling back silently, when the stream is missing.
-- `/dictation-source` lists the machines whose microphones answer, and `/dictation-source t14` records from one of them. Without it, pi takes the first stream it finds, so a single connected machine needs nothing.
+- `/dictation-source` lists the machines whose microphones answer, and `/dictation-source t14` records from one of them, skipping the energy comparison. Without it, pi decides from the audio itself, so a single connected machine needs nothing.
 - Any local user on the remote host can connect to the forwarded port and record the client microphone. Use a host you trust.
 
 Ports:

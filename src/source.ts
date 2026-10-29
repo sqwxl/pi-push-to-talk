@@ -12,6 +12,7 @@ import { openMicrophone, type Microphone } from "./capture.ts";
 import { AUDIO_PORTS } from "./config.ts";
 import { trace } from "./debug.ts";
 import { openStream, STREAM_FAILED } from "./stream.ts";
+import { pickStream } from "./select.ts";
 
 export const AUDIO_ENV = "PI_DICTATION_AUDIO";
 
@@ -45,16 +46,13 @@ const NO_MICROPHONE =
 const DEAD_FORWARD =
 	"A forwarded microphone port answered but no helper was there. Reconnect this host, or start ~/.local/bin/pi-mic-stream on the machine you connect from";
 
-/** Port of the last successful stream, tried first on the next hold. */
-let cached: string | undefined;
-/** Port the user picked by hand; wins over discovery. */
+/** Port the user picked by hand; skips the energy comparison. */
 let pinned: string | undefined;
 /** Nothing answered until this time; skip the probe until then. */
 let silentUntil = 0;
 
-/** Test seam: forget the cached port and the backoff window. */
+/** Test seam: forget the backoff window and any pinned source. */
 export function resetAudioSearch(): void {
-	cached = undefined;
 	pinned = undefined;
 	silentUntil = 0;
 }
@@ -62,7 +60,6 @@ export function resetAudioSearch(): void {
 /** Pins one stream until the process exits; `undefined` returns to discovery. */
 export function pinAudioSource(target: string | undefined): void {
 	pinned = target;
-	cached = undefined;
 }
 
 /** Every stream that greets, so the user can see and pick one. */
@@ -90,32 +87,32 @@ export async function openAudioSource(
 ): Promise<Microphone> {
 	const configured = process.env[AUDIO_ENV]?.trim();
 	const all = configured ? [configured] : AUDIO_PORTS.map((port) => `127.0.0.1:${port}`);
-	const order = pinned && all.includes(pinned) ? [pinned, ...all.filter((t) => t !== pinned)] : all;
-	const targets = cached && order.includes(cached) ? [cached, ...order.filter((t) => t !== cached)] : order;
+	const targets = pinned && all.includes(pinned) ? [pinned] : all;
 	let answered = false;
 
 	if (!configured && Date.now() < silentUntil) {
 		trace("audio search skipped after a recent miss");
 	} else {
-		for (const target of targets) {
-			try {
-				const mic = await openers.openRemote(target, source.onSamples, source.onError);
-				cached = target;
-				trace(`audio from ${target} (${mic.client ?? "unknown client"})`);
-				return mic;
-			} catch (error) {
-				const reason = error instanceof Error ? error.message : String(error);
-				// A refusal never connected; anything after that reached a listener.
-				if (reason.startsWith(STREAM_FAILED)) answered = true;
-				if (cached === target) cached = undefined;
-				trace(`audio stream ${target} unavailable (${reason})`);
-				if (configured) {
-					source.notify(
-						`Dictation: audio stream ${target} unavailable (${reason}); using the local microphone`,
-						"warning",
-					);
-				}
-			}
+		const failures: Error[] = [];
+		const mic = await pickStream(
+			targets,
+			(target, onSamples, onError) => openers.openRemote(target, onSamples, onError),
+			source.onSamples,
+			source.onError,
+			failures,
+		);
+		// A refusal never connected; anything after that reached a listener.
+		answered = failures.some((error) => error.message.startsWith(STREAM_FAILED));
+		for (const error of failures) trace(`audio stream unavailable (${error.message})`);
+		if (configured && failures.length > 0 && !mic) {
+			source.notify(
+				`Dictation: audio stream ${configured} unavailable; using the local microphone`,
+				"warning",
+			);
+		}
+		if (mic) {
+			trace(`audio from ${mic.client ?? "unknown client"}`);
+			return mic;
 		}
 		if (!configured) silentUntil = Date.now() + RESCAN_MS;
 	}
