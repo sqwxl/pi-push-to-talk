@@ -41,13 +41,21 @@ type Entry = {
 	buffering: boolean;
 	/** Loudest chunk so far, which carries the speech. */
 	peak: number;
-	/** Quietest chunk so far: this stream's own noise floor. */
-	floor: number;
+	/** Every chunk level, so the floor can be the middle of them. */
+	levels: number[];
 	heard: Float32Array[];
 };
 
-/** How far this stream rose above its own floor. */
-const score = (entry: Entry): number => entry.peak / Math.max(entry.floor, MIN_FLOOR);
+/** How far this stream rose above its own noise floor. */
+const score = (entry: Entry): number => entry.peak / Math.max(median(entry.levels), MIN_FLOOR);
+
+/** Middle chunk level: room noise when the hold starts, speech when it does not. */
+function median(values: number[]): number {
+	if (values.length === 0) return 0;
+	const sorted = [...values].sort((a, b) => a - b);
+	const middle = Math.floor(sorted.length / 2);
+	return sorted.length % 2 === 0 ? ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2 : (sorted[middle] ?? 0);
+}
 
 /**
  * Opens every target, waits for one stream to rise above its floor, and
@@ -71,7 +79,13 @@ export async function pickStream(
 
 	await Promise.all(
 		targets.map(async (target) => {
-			const entry: Entry = { target, buffering: true, peak: 0, floor: Number.POSITIVE_INFINITY, heard: [] };
+			const entry: Entry = {
+				target,
+				buffering: true,
+				peak: 0,
+				levels: [],
+				heard: [],
+			};
 			try {
 				entry.mic = await open(
 					target,
@@ -83,7 +97,7 @@ export async function pickStream(
 						entry.heard.push(samples);
 						const level = rmsOf(samples);
 						entry.peak = Math.max(entry.peak, level);
-						entry.floor = Math.min(entry.floor, level);
+						entry.levels.push(level);
 						settle();
 					},
 					// A stream that fails later is the caller's problem only once it

@@ -44,16 +44,18 @@ test("the stream with speech wins and its buffered audio is replayed", async () 
 	const picking = pickStream(["127.0.0.1:47777", "127.0.0.1:47778"], open, (chunk) => sink.push(chunk), () => {}, [], 200);
 	await new Promise((resolve) => setTimeout(resolve, 10));
 
-	// Each stream first shows its own noise floor, then speech.
-	pushers.get("t14")?.(loud(0.002));
-	pushers.get("squishy")?.(loud(0.0005));
+	// Each stream shows a few noise chunks, then speech on one of them.
+	for (let i = 0; i < 3; i++) {
+		pushers.get("t14")?.(loud(0.002));
+		pushers.get("squishy")?.(loud(0.0005));
+	}
 	pushers.get("t14")?.(loud(0.003));
 	pushers.get("squishy")?.(loud(0.3));
 
 	const mic = await picking;
 	assert.equal(mic?.client, "squishy");
 	assert.deepEqual(stopped, ["t14"], "the losing stream is closed");
-	assert.equal(sink.length, 2, "the winner's audio was replayed");
+	assert.equal(sink.length, 4, "the winner's audio was replayed");
 	assert.ok(Math.abs((sink.at(-1)?.[0] ?? 0) - 0.3) < 0.001);
 });
 
@@ -65,8 +67,10 @@ test("a clearly louder stream wins before the deadline", async () => {
 	const started = Date.now();
 	const picking = pickStream(["127.0.0.1:47777", "127.0.0.1:47778"], open, () => {}, () => {}, [], 1000);
 	await new Promise((resolve) => setTimeout(resolve, 10));
-	pushers.get("t14")?.(loud(0.002));
-	pushers.get("squishy")?.(loud(0.0005));
+	for (let i = 0; i < 3; i++) {
+		pushers.get("t14")?.(loud(0.002));
+		pushers.get("squishy")?.(loud(0.0005));
+	}
 	pushers.get("t14")?.(loud(0.002));
 	pushers.get("squishy")?.(loud(0.25));
 	const mic = await picking;
