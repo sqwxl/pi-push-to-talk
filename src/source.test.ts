@@ -166,5 +166,5 @@ test("a device that fails after opening still carries the message", async () => 
 		);
 	});
 	assert.equal(errors.length, 1, "the failure is reported once");
-	assert.match(errors[0] ?? "", /No microphone on this host\. Run \/dictation-setup <ssh-host>/);
+	assert.match(errors[0] ?? "", /No microphone on this host\. Run \/dictation-setup <pi-host>/);
 });

@@ -36,7 +36,7 @@ const defaultOpeners: Openers = { openDevice: openMicrophone, openRemote: openSt
 
 /** Nothing answered, so this host has to record by itself. */
 const NO_MICROPHONE =
-	"No microphone on this host. Run /dictation-setup <ssh-host> to generate the command you will need to run on the machine you are connecting from";
+	"No microphone on this host. Run /dictation-setup <pi-host> to generate the command you will need to run on the machine you are connecting from";
 
 /**
  * A forward exists but nothing usable answers behind it: a stale SSH session,

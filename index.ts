@@ -58,7 +58,10 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 		handler: async (args, ctx) => {
 			// Both the notice and the command offer the host, so the missing
 			// argument never turns into a usage error the user cannot act on.
-			const typed = args.trim() || (await ctx.ui.input("SSH host for this machine", "bluefin.local")) || "";
+			const typed =
+				args.trim() ||
+				(await ctx.ui.input("SSH host that runs pi, e.g. the name you SSH to for this machine", "bluefin.local")) ||
+				"";
 			const host = parseHost(typed);
 			if (!host) {
 				ctx.ui.notify(`Dictation: "${typed.trim()}" is not an SSH host name`, "error");
