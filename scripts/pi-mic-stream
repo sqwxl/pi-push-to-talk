@@ -7,7 +7,8 @@
 # leaves the listener alone, which is why no cleanup is needed on disconnect.
 #
 # Each connection starts with one `pi-mic <host>` line, then 16 kHz mono
-# signed 16-bit little-endian PCM.
+# signed 16-bit little-endian PCM. The listening port here is always 17777;
+# the port on the far side of the forward is the one that varies.
 set -eu
 
 if [ "${1:-}" = "--serve" ]; then
@@ -18,7 +19,7 @@ if [ "${1:-}" = "--serve" ]; then
 	exec ffmpeg -hide_banner -loglevel error -f avfoundation -i :0 -ar 16000 -ac 1 -f s16le -
 fi
 
-port="${1:-47777}"
+port=17777
 
 if ! command -v parec >/dev/null 2>&1 && ! command -v ffmpeg >/dev/null 2>&1; then
 	# No recorder: leave the port closed so pi uses another source.
