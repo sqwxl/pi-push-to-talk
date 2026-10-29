@@ -20,6 +20,11 @@ export const MAX_PICK_MS = 2500;
 const MARGIN = 4;
 /** Below this level nobody is speaking, whatever the floor. */
 const SPEECH_RMS = 0.02;
+/**
+ * A steady hum sits at a fixed level well above silence, so being loud is not
+ * enough: the winner must also have risen this far above its own floor.
+ */
+const SCORE_MIN = 1.5;
 /** Ratios against a digitally silent stream are meaningless, so cap the floor. */
 const MIN_FLOOR = 0.004;
 
@@ -108,7 +113,10 @@ export async function pickStream(
 		const clearLeader = (): boolean => {
 			const [first, second] = rank(entries);
 			return Boolean(
-				first && first.peak >= SPEECH_RMS && (!second || score(first) >= score(second) * MARGIN),
+				first &&
+					first.peak >= SPEECH_RMS &&
+					score(first) >= SCORE_MIN &&
+					(!second || score(first) >= score(second) * MARGIN),
 			);
 		};
 		const done = (): void => {
@@ -120,7 +128,7 @@ export async function pickStream(
 		// After the soft window, only a stream that actually heard speech settles it.
 		const soft = setTimeout(() => {
 			const leader = best();
-			if (leader && leader.peak >= SPEECH_RMS) done();
+			if (leader && leader.peak >= SPEECH_RMS && score(leader) >= SCORE_MIN) done();
 		}, softMs);
 		settle = () => {
 			if (clearLeader()) done();

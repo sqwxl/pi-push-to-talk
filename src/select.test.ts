@@ -74,6 +74,21 @@ test("a clearly louder stream wins before the deadline", async () => {
 	assert.ok(Date.now() - started < 500, "no need to wait out the window");
 });
 
+test("a steady hum does not count as speech", async () => {
+	const { open, pushers } = harness({
+		"127.0.0.1:47777": "t14",
+		"127.0.0.1:47778": "squishy",
+	});
+	// t14 hums above the speech threshold but never rises; squishy is silent.
+	for (let i = 0; i < 6; i++) pushers.get("t14")?.(loud(0.22));
+	const started = Date.now();
+	const picking = pickStream(["127.0.0.1:47777", "127.0.0.1:47778"], open, () => {}, () => {}, [], 20, 200);
+	for (let i = 0; i < 6; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+	const mic = await picking;
+	assert.equal(mic?.client, "t14", "the only stream carrying signal still wins");
+	assert.ok(Date.now() - started >= 180, "but not before the whole window was heard");
+});
+
 test("silent streams settle on the first one after the deadline", async () => {
 	const { open } = harness({ "127.0.0.1:47777": "t14", "127.0.0.1:47778": "squishy" });
 	const mic = await pickStream(["127.0.0.1:47777", "127.0.0.1:47778"], open, () => {}, () => {}, [], 50, 80);
