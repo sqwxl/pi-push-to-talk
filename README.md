@@ -73,6 +73,8 @@ Requirements on the machine with the microphone:
 - `socat`
 - `parec` (Linux) or `ffmpeg` (macOS), plus microphone permission for the terminal
 
+The setup script stops and names whichever of these is missing, then starts the helper and checks that it answers on `17777`. A helper that cannot greet fails the setup instead of leaving a port that accepts connections with no audio behind it.
+
 Notes:
 
 - The helper listens on loopback only, and the forward binds loopback on the remote host. Nothing is exposed to the network.
