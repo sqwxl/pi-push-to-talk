@@ -59,7 +59,7 @@ The entry the script writes, with the port it chose:
 Host bluefin.local
   RemoteForward 127.0.0.1:47778 127.0.0.1:17777
   PermitLocalCommand yes
-  LocalCommand sh -c 'nohup "$HOME/.local/bin/pi-mic-stream" >/dev/null 2>&1 &'
+  LocalCommand sh -c 'nohup "$HOME/.local/bin/pi-mic-stream" %h >/dev/null 2>&1 &'
   # Successful connections need no forwarding log; every later one would warn.
   LogLevel ERROR
 ```
@@ -81,6 +81,16 @@ Notes:
 - One recorder starts per hold, so the microphone is open only while you speak. With two machines connected, both record for the first moments of a hold until one is dropped.
 - The stream is 16 kHz mono, about 32 KB/s. SSH compression does not help it.
 - Each connection to a helper starts with one `pi-mic <host>` line: it names the machine, and it lets pi skip ports that a stale session or another machine answers.
+- A refused forward is not fatal: the helper asks the connection that started it for the first free port in the range, so a port held by a stale session only costs one candidate. This needs a multiplexed connection (a control socket); a plain one-off `ssh` keeps the single configured port.
+- On the host that runs pi, sshd should reap dead sessions. Without this, a client that sleeps or loses its network can leave a port bound for hours:
+
+  ```sshconfig
+  # /etc/ssh/sshd_config on the host that runs pi
+  ClientAliveInterval 15
+  ClientAliveCountMax 3
+  ```
+
+  Those sessions then end about 45 seconds after the client stops answering, and their ports free.
 - `PI_DICTATION_AUDIO=host:port` overrides the search and warns, instead of falling back silently, when the stream is missing.
 - `/dictation-source` lists the machines whose microphones answer, and `/dictation-source t14` records from one of them, skipping the energy comparison. Without it, pi decides from the audio itself, so a single connected machine needs nothing.
 - Any local user on the remote host can connect to the forwarded port and record the client microphone. Use a host you trust.
