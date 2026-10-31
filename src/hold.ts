@@ -5,8 +5,12 @@
  * kitty key releases arrive. The press is left to the editor, so typing a space
  * never depends on this state machine: if the key stays down past HOLD_MS the
  * space the editor just typed is taken back and dictation starts.
+ *
+ * Hold detection needs key releases, which only the kitty keyboard protocol
+ * reports. A terminal without it sends presses only, so a tap is
+ * indistinguishable from a hold and the handler stays out of the way.
  */
-import { isKeyRelease, isKeyRepeat, matchesKey } from "@earendil-works/pi-tui";
+import { isKeyRelease, isKeyRepeat, isKittyProtocolActive, matchesKey } from "@earendil-works/pi-tui";
 import { HOLD_MS, RELEASE_GAP_MS } from "./config.ts";
 import { trace } from "./debug.ts";
 import type { DictationEditor } from "./editor.ts";
@@ -49,6 +53,10 @@ export class SpaceHold {
 
 	/** Returns true when the event belongs to dictation and must be consumed. */
 	handle(data: string): boolean {
+		// No key releases means a hold can never end: the first tap would start
+		// dictation, and every later space would be swallowed. Type normally instead.
+		if (!isKittyProtocolActive()) return false;
+
 		const editor = this.deps.getEditor();
 
 		// Raw terminal input is global: dialogs and nested editors receive it too.

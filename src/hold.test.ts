@@ -72,6 +72,8 @@ type FakeSession = {
 
 function harness(getStt: () => Promise<unknown> = async () => ({})) {
 	mock.timers.enable({ apis: ["setTimeout", "Date"] });
+	// The tests emulate a kitty terminal; every press comes with a release.
+	tui?.setKittyProtocolActive(true);
 	const editor = makeEditor();
 	const sessions: FakeSession[] = [];
 	const hold = new SpaceHold!({
@@ -130,6 +132,39 @@ test("a hold right after typing dictates", { skip }, async () => {
 		hold.handle(RELEASE);
 		assert.equal(sessions[0]?.stopped, true);
 	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("a terminal without key releases is left to the editor", { skip }, async () => {
+	const { editor, hold, sessions } = harness();
+	try {
+		// The Linux console reports presses only, so a hold can never be detected.
+		tui!.setKittyProtocolActive(false);
+
+		assert.equal(hold.handle(" "), false, "the press reaches the editor");
+		editor.typeSpace();
+		mock.timers.tick(HOLD_MS + 10);
+		await flush();
+
+		assert.equal(sessions.length, 0, "a tap must not start dictation");
+		assert.equal(editor.text, " ");
+
+		// Typing on, and pressing space again, must stay untouched.
+		hold.handle("a");
+		editor.text += "a";
+		editor.cursor = editor.text.length;
+		for (let i = 0; i < 3; i++) {
+			assert.equal(hold.handle(" "), false);
+			editor.typeSpace();
+			mock.timers.tick(60);
+		}
+		await flush();
+
+		assert.equal(sessions.length, 0);
+		assert.equal(editor.text, " a   ");
+	} finally {
+		tui!.setKittyProtocolActive(true);
 		mock.timers.reset();
 	}
 });
