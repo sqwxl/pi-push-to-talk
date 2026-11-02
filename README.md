@@ -110,7 +110,7 @@ Ports:
 ## Requirements
 
 - pi with extension support
-- A terminal that reports key releases (kitty keyboard protocol: kitty, Ghostty, foot, WezTerm, or tmux with extended keys)
+- A terminal that forwards key releases, not just one that claims the kitty keyboard protocol (kitty, Ghostty, foot, WezTerm, or tmux with extended keys)
 - A microphone the terminal may use, or a remote audio stream
 - `socat` and `parec` or `ffmpeg` on the machine with the microphone, for remote use
 - macOS, Linux, or Windows, x64 or arm64
@@ -122,8 +122,8 @@ Ports:
 - Brackets are stripped from transcripts, since Whisper emits them as sound captions. Dictating code with brackets is not supported.
 - The cursor is restored with simulated left-arrow presses, capped at 4,000 characters. Inserting near the start of a very long prompt can leave the cursor short of the dictation point.
 - Nested editors (dialogs) do not accept dictation, only normal typing.
+- Hold-to-talk turns on after the terminal reports its first space release. Terminals that never report space releases type spaces normally: the Linux console, most Android or iOS SSH clients, and Herdr panes whose outer client sends no releases. A multiplexer can answer the kitty protocol query for a pane, or report releases for other keys, without forwarding a space release.
 - If the terminal drops key releases, a second press stops dictation instead of the release. A re-press is recognised as a new key after 250 ms without a space event, so a keyboard whose auto-repeat is slower than that would stop early.
-- The Linux console and other terminals without the kitty keyboard protocol report presses only. Dictation is off there, so space always types a space. Dictating needs a terminal emulator that supports the protocol.
 
 ## Diagnostics
 

@@ -6,11 +6,13 @@
  * never depends on this state machine: if the key stays down past HOLD_MS the
  * space the editor just typed is taken back and dictation starts.
  *
- * Hold detection needs key releases, which only the kitty keyboard protocol
- * reports. A terminal without it sends presses only, so a tap is
- * indistinguishable from a hold and the handler stays out of the way.
+ * A terminal that does not report space releases cannot tell a tap from a hold.
+ * It is not enough to ask whether the kitty protocol is active: a multiplexer
+ * such as Herdr answers that query for its panes, but still has no space
+ * release to forward when the outer terminal does not report one. Only an
+ * observed space release proves that holds can be detected.
  */
-import { isKeyRelease, isKeyRepeat, isKittyProtocolActive, matchesKey } from "@earendil-works/pi-tui";
+import { isKeyRelease, isKeyRepeat, matchesKey } from "@earendil-works/pi-tui";
 import { HOLD_MS, RELEASE_GAP_MS } from "./config.ts";
 import { trace } from "./debug.ts";
 import type { DictationEditor } from "./editor.ts";
@@ -44,6 +46,8 @@ export class SpaceHold {
 	private holdId = 0;
 	/** When the previous space event arrived, to spot a missing release. */
 	private lastSpaceAt = 0;
+	/** The terminal has sent a space release, so it can report a hold. */
+	private sawRelease = false;
 	/** Resolves when the previous session finished its final decode. */
 	private stopping: Promise<unknown> = Promise.resolve();
 
@@ -53,9 +57,7 @@ export class SpaceHold {
 
 	/** Returns true when the event belongs to dictation and must be consumed. */
 	handle(data: string): boolean {
-		// No key releases means a hold can never end: the first tap would start
-		// dictation, and every later space would be swallowed. Type normally instead.
-		if (!isKittyProtocolActive()) return false;
+		const released = isKeyRelease(data);
 
 		const editor = this.deps.getEditor();
 
@@ -67,7 +69,13 @@ export class SpaceHold {
 			return false;
 		}
 
-		if (matchesKey(data, "space")) return this.handleSpace(isKeyRelease(data), isKeyRepeat(data));
+		if (matchesKey(data, "space")) {
+			// Only a space release proves that this key can be held. A release from
+			// another key says nothing about the key the gesture needs.
+			if (released) this.sawRelease = true;
+			return this.handleSpace(released, isKeyRepeat(data));
+		}
+
 		return false;
 	}
 
@@ -90,7 +98,7 @@ export class SpaceHold {
 		this.lastSpaceAt = now;
 
 		trace(
-			`space release=${String(released)} repeat=${String(repeated)} gap=${gap} holding=${String(this.holding)} active=${String(this.session?.isActive())}`,
+			`space release=${String(released)} repeat=${String(repeated)} gap=${gap} holding=${String(this.holding)} releases=${String(this.sawRelease)} active=${String(this.session?.isActive())}`,
 		);
 
 		if (this.session?.isActive()) {
@@ -106,6 +114,16 @@ export class SpaceHold {
 			// A session that failed by itself is already stopping; keep that
 			// shutdown visible to the next begin before the key is pressed again.
 			this.finish();
+			return false; // the space the editor typed stays
+		}
+
+		// Without a space release a tap and a hold look identical. Taking the space
+		// back would delete ordinary text and open the microphone for a key the
+		// user only tapped.
+		if (!this.canHold()) {
+			this.holding = false;
+			this.clearHoldTimer();
+			trace("hold skipped: terminal reports no space release");
 			return false; // the space the editor typed stays
 		}
 
@@ -130,6 +148,15 @@ export class SpaceHold {
 			this.requestBegin(id);
 		}, HOLD_MS);
 		return false;
+	}
+
+	/**
+	 * True once this terminal proves it reports a space release. The kitty
+	 * protocol flag is not proof: a multiplexer can report it, or report other
+	 * keys' releases, for a client that never sends a space release.
+	 */
+	private canHold(): boolean {
+		return this.sawRelease;
 	}
 
 	private finish(): void {

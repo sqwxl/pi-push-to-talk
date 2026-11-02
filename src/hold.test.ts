@@ -21,6 +21,7 @@ const { SpaceHold } = (await import("./hold.ts").catch(() => ({}))) as {
 
 const PRESS = "\x1b[32u";
 const RELEASE = "\x1b[32;1:3u";
+const LETTER_RELEASE = "\x1b[97;1:3u";
 const skip = !tui || !SpaceHold;
 
 type FakeEditor = {
@@ -70,10 +71,8 @@ type FakeSession = {
 	cancel(): void;
 };
 
-function harness(getStt: () => Promise<unknown> = async () => ({})) {
+function harness(getStt: () => Promise<unknown> = async () => ({}), releases = true) {
 	mock.timers.enable({ apis: ["setTimeout", "Date"] });
-	// The tests emulate a kitty terminal; every press comes with a release.
-	tui?.setKittyProtocolActive(true);
 	const editor = makeEditor();
 	const sessions: FakeSession[] = [];
 	const hold = new SpaceHold!({
@@ -106,6 +105,7 @@ function harness(getStt: () => Promise<unknown> = async () => ({})) {
 			return session as never;
 		},
 	});
+	if (releases) hold.handle(RELEASE); // a tap proves the terminal reports releases
 	return { editor, hold, sessions };
 }
 
@@ -114,6 +114,12 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
 /** Simulate the editor receiving a space the hold handler did not consume. */
 function press(hold: InstanceType<typeof import("./hold.ts").SpaceHold>, editor: FakeEditor): void {
 	hold.handle(PRESS);
+	editor.typeSpace();
+}
+
+/** Simulate a terminal without the kitty protocol: a bare space press. */
+function plainPress(hold: InstanceType<typeof import("./hold.ts").SpaceHold>, editor: FakeEditor): void {
+	hold.handle(" ");
 	editor.typeSpace();
 }
 
@@ -137,11 +143,9 @@ test("a hold right after typing dictates", { skip }, async () => {
 });
 
 test("a terminal without key releases is left to the editor", { skip }, async () => {
-	const { editor, hold, sessions } = harness();
+	const { editor, hold, sessions } = harness(undefined, false);
 	try {
 		// The Linux console reports presses only, so a hold can never be detected.
-		tui!.setKittyProtocolActive(false);
-
 		assert.equal(hold.handle(" "), false, "the press reaches the editor");
 		editor.typeSpace();
 		mock.timers.tick(HOLD_MS + 10);
@@ -164,7 +168,6 @@ test("a terminal without key releases is left to the editor", { skip }, async ()
 		assert.equal(sessions.length, 0);
 		assert.equal(editor.text, " a   ");
 	} finally {
-		tui!.setKittyProtocolActive(true);
 		mock.timers.reset();
 	}
 });
@@ -256,6 +259,80 @@ test("a slow first repeat is not a new press", { skip }, async () => {
 
 		assert.equal(sessions.length, 1, "the hold still starts");
 		assert.equal(editor.text, "", "no stray space from the repeat");
+		hold.handle(RELEASE);
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("a terminal without key releases types spaces normally", { skip }, async () => {
+	const { editor, hold, sessions } = harness(undefined, false);
+	try {
+		plainPress(hold, editor);
+		mock.timers.tick(HOLD_MS + 10);
+		await flush();
+
+		assert.equal(sessions.length, 0, "a tap must not start a hold");
+		assert.equal(editor.text, " ", "the space stays");
+
+		plainPress(hold, editor);
+		mock.timers.tick(HOLD_MS + 10);
+		await flush();
+
+		assert.equal(sessions.length, 0);
+		assert.equal(editor.text, "  ");
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("the kitty flag alone does not prove releases arrive", { skip }, async () => {
+	const { editor, hold, sessions } = harness(undefined, false);
+	try {
+		// Herdr answers the kitty query for its panes, but cannot invent releases
+		// for an outer client that never sends them.
+		tui!.setKittyProtocolActive(true);
+		plainPress(hold, editor);
+		mock.timers.tick(HOLD_MS + 10);
+		await flush();
+
+		assert.equal(sessions.length, 0);
+		assert.equal(editor.text, " ");
+	} finally {
+		tui!.setKittyProtocolActive(false);
+		mock.timers.reset();
+	}
+});
+
+test("a release from another key does not arm holds", { skip }, async () => {
+	const { editor, hold, sessions } = harness(undefined, false);
+	try {
+		// A multiplexer can report releases for some keys without forwarding the
+		// space release the hold gesture depends on.
+		hold.handle(LETTER_RELEASE);
+		plainPress(hold, editor);
+		mock.timers.tick(HOLD_MS + 10);
+		await flush();
+
+		assert.equal(sessions.length, 0);
+		assert.equal(editor.text, " ");
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("a release arms the next hold", { skip }, async () => {
+	const { editor, hold, sessions } = harness(undefined, false);
+	try {
+		plainPress(hold, editor); // the first tap types a space
+		hold.handle(RELEASE); // its release proves holds can be detected
+
+		plainPress(hold, editor);
+		mock.timers.tick(HOLD_MS + 10);
+		await flush();
+
+		assert.equal(sessions.length, 1);
+		assert.equal(editor.text, " ", "the first tap's space stays");
 		hold.handle(RELEASE);
 	} finally {
 		mock.timers.reset();
