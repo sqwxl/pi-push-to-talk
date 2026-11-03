@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. This project follows [Semantic Versioning](https://semver.org/).
 
+## [0.6.3] - 2026-11-03
+
+### Fixed
+
+- start hold-to-talk on the first key repeat ([cfc3aaa](https://github.com/sqwxl/pi-push-to-talk/commit/cfc3aaa7f2d8d77e0db0dcfaa8a9afc520993482))
+
 ## [0.6.2] - 2026-11-03
 
 ### Fixed
@@ -65,6 +71,7 @@ All notable changes to this project are documented here. This project follows [S
 - keep whisper punctuation at mid-session commits ([5a61c59](https://github.com/sqwxl/pi-push-to-talk/commit/5a61c5990b802db980860e432f695e198f09791f))
 - stop losing dictation on stop races, repeated phrases, and first use ([56db179](https://github.com/sqwxl/pi-push-to-talk/commit/56db1799acade9b19b5997e2db47155f814f88d9))
 
+[0.6.3]: https://github.com/sqwxl/pi-push-to-talk/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/sqwxl/pi-push-to-talk/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/sqwxl/pi-push-to-talk/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/sqwxl/pi-push-to-talk/compare/v0.5.0...v0.6.0
