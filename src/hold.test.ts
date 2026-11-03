@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
-import { HOLD_MS, RELEASE_GAP_MS } from "./config.ts";
+import { REPEAT_GAP_MS, RELEASE_GAP_MS } from "./config.ts";
 
 type PiTui = typeof import("@earendil-works/pi-tui");
 
@@ -20,8 +20,8 @@ const { SpaceHold } = (await import("./hold.ts").catch(() => ({}))) as {
 };
 
 const PRESS = "\x1b[32u";
+const REPEAT = "\x1b[32;1:2u";
 const RELEASE = "\x1b[32;1:3u";
-const LETTER_RELEASE = "\x1b[97;1:3u";
 const skip = !tui || !SpaceHold;
 
 type FakeEditor = {
@@ -71,7 +71,7 @@ type FakeSession = {
 	cancel(): void;
 };
 
-function harness(getStt: () => Promise<unknown> = async () => ({}), releases = true) {
+function harness(getStt: () => Promise<unknown> = async () => ({})) {
 	mock.timers.enable({ apis: ["setTimeout", "Date"] });
 	const editor = makeEditor();
 	const sessions: FakeSession[] = [];
@@ -105,7 +105,6 @@ function harness(getStt: () => Promise<unknown> = async () => ({}), releases = t
 			return session as never;
 		},
 	});
-	if (releases) hold.handle(RELEASE); // a tap proves the terminal reports releases
 	return { editor, hold, sessions };
 }
 
@@ -123,18 +122,17 @@ function plainPress(hold: InstanceType<typeof import("./hold.ts").SpaceHold>, ed
 	editor.typeSpace();
 }
 
-test("a hold right after typing dictates", { skip }, async () => {
+test("the first hold after startup dictates", { skip }, async () => {
 	const { editor, hold, sessions } = harness();
 	try {
-		hold.handle("a"); // typing no longer blocks a hold
-		editor.text = "a";
-		editor.cursor = 1;
-
 		press(hold, editor);
-		mock.timers.tick(HOLD_MS + 10);
-		await flush();
+		mock.timers.tick(40);
+		assert.equal(hold.handle(REPEAT), true, "the repeat is consumed");
 
+		await flush();
 		assert.equal(sessions.length, 1, `session started; buffer=${JSON.stringify(editor.text)}`);
+		assert.equal(editor.text, "", "the space the press typed is taken back");
+
 		hold.handle(RELEASE);
 		assert.equal(sessions[0]?.stopped, true);
 	} finally {
@@ -142,46 +140,102 @@ test("a hold right after typing dictates", { skip }, async () => {
 	}
 });
 
-test("a terminal without key releases is left to the editor", { skip }, async () => {
-	const { editor, hold, sessions } = harness(undefined, false);
-	try {
-		// The Linux console reports presses only, so a hold can never be detected.
-		assert.equal(hold.handle(" "), false, "the press reaches the editor");
-		editor.typeSpace();
-		mock.timers.tick(HOLD_MS + 10);
-		await flush();
-
-		assert.equal(sessions.length, 0, "a tap must not start dictation");
-		assert.equal(editor.text, " ");
-
-		// Typing on, and pressing space again, must stay untouched.
-		hold.handle("a");
-		editor.text += "a";
-		editor.cursor = editor.text.length;
-		for (let i = 0; i < 3; i++) {
-			assert.equal(hold.handle(" "), false);
-			editor.typeSpace();
-			mock.timers.tick(60);
-		}
-		await flush();
-
-		assert.equal(sessions.length, 0);
-		assert.equal(editor.text, " a   ");
-	} finally {
-		mock.timers.reset();
-	}
-});
-
-test("a tap below the hold threshold leaves the space", { skip }, async () => {
+test("a tap below the repeat leaves the space", { skip }, async () => {
 	const { editor, hold, sessions } = harness();
 	try {
 		press(hold, editor);
-		mock.timers.tick(HOLD_MS - 10);
+		mock.timers.tick(120);
 		hold.handle(RELEASE);
 		await flush();
 
 		assert.equal(sessions.length, 0);
 		assert.equal(editor.text, " ");
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("held-key repeats keep dictating and type nothing", { skip }, async () => {
+	const { editor, hold, sessions } = harness();
+	try {
+		press(hold, editor);
+		mock.timers.tick(40);
+		hold.handle(REPEAT);
+		await flush();
+
+		assert.equal(sessions.length, 1);
+		for (let i = 0; i < 5; i++) {
+			mock.timers.tick(30);
+			assert.equal(hold.handle(REPEAT), true);
+		}
+		assert.equal(sessions[0]?.stopped, false, "repeats are not a new press");
+		assert.equal(editor.text, "");
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("a plain-space repeat holds without key releases", { skip }, async () => {
+	const { editor, hold, sessions } = harness();
+	try {
+		// The Linux console sends presses only: no release ever tells a tap from
+		// a hold, but the auto-repeat does.
+		plainPress(hold, editor);
+		mock.timers.tick(40);
+		assert.equal(hold.handle(" "), true, "the repeat is consumed");
+
+		await flush();
+		assert.equal(sessions.length, 1);
+		assert.equal(editor.text, "");
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("a slow second press is a new tap, not a hold", { skip }, async () => {
+	const { editor, hold, sessions } = harness();
+	try {
+		press(hold, editor);
+		mock.timers.tick(REPEAT_GAP_MS + 10);
+		press(hold, editor);
+		await flush();
+
+		assert.equal(sessions.length, 0);
+		assert.equal(editor.text, "  ", "both spaces stay");
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("a slow first repeat leaves one space before dictating", { skip }, async () => {
+	const { editor, hold, sessions } = harness();
+	try {
+		plainPress(hold, editor);
+		// The first repeat waits for the keyboard's repeat delay.
+		mock.timers.tick(400);
+		plainPress(hold, editor);
+		mock.timers.tick(40);
+		assert.equal(hold.handle(" "), true);
+
+		await flush();
+		assert.equal(sessions.length, 1);
+		assert.equal(editor.text, " ", "the slow first repeat's space stays");
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("a release ends the session", { skip }, async () => {
+	const { editor, hold, sessions } = harness();
+	try {
+		press(hold, editor);
+		mock.timers.tick(40);
+		hold.handle(REPEAT);
+		await flush();
+		hold.handle(RELEASE);
+
+		assert.equal(sessions[0]?.stopped, true);
+		assert.equal(editor.text, "");
 	} finally {
 		mock.timers.reset();
 	}
@@ -196,7 +250,8 @@ test("cancel while the model loads leaves no stray space", { skip }, async () =>
 	});
 	try {
 		press(hold, editor);
-		mock.timers.tick(HOLD_MS + 10); // begin takes back the space, then waits
+		mock.timers.tick(40);
+		hold.handle(REPEAT); // begin takes the space back, then waits for the model
 		hold.cancel(); // e.g. the prompt was submitted
 		releaseStt();
 		await flush();
@@ -212,13 +267,14 @@ test("a lost release does not leave the microphone open", { skip }, async () => 
 	const { editor, hold, sessions } = harness();
 	try {
 		press(hold, editor);
-		mock.timers.tick(HOLD_MS + 10);
+		mock.timers.tick(40);
+		hold.handle(REPEAT);
 		await flush();
 		assert.equal(sessions.length, 1);
 
 		// The terminal dropped the release; the next press is a new key.
 		mock.timers.tick(RELEASE_GAP_MS + 50);
-		hold.handle(PRESS);
+		assert.equal(hold.handle(PRESS), true);
 		await flush();
 
 		assert.equal(sessions[0]?.stopped, true, "the lost release must close the session");
@@ -228,112 +284,19 @@ test("a lost release does not leave the microphone open", { skip }, async () => 
 	}
 });
 
-test("held-key repeats keep dictating", { skip }, async () => {
+test("a space typed after dictation stays", { skip }, async () => {
 	const { editor, hold, sessions } = harness();
 	try {
 		press(hold, editor);
-		for (let i = 0; i < 40; i++) {
-			mock.timers.tick(30);
-			hold.handle(PRESS);
-		}
+		mock.timers.tick(40);
+		hold.handle(REPEAT);
 		await flush();
-
-		assert.equal(sessions.length, 1);
-		assert.equal(sessions[0]?.stopped, false, "repeats are not a new press");
 		hold.handle(RELEASE);
-		assert.equal(sessions[0]?.stopped, true);
-	} finally {
-		mock.timers.reset();
-	}
-});
+		mock.timers.tick(RELEASE_GAP_MS);
 
-test("a slow first repeat is not a new press", { skip }, async () => {
-	const { editor, hold, sessions } = harness();
-	try {
 		press(hold, editor);
-		// Some keyboards wait 250-660 ms before the first repeat.
-		mock.timers.tick(RELEASE_GAP_MS + 60);
-		hold.handle(PRESS);
-		mock.timers.tick(HOLD_MS);
-		await flush();
-
-		assert.equal(sessions.length, 1, "the hold still starts");
-		assert.equal(editor.text, "", "no stray space from the repeat");
-		hold.handle(RELEASE);
-	} finally {
-		mock.timers.reset();
-	}
-});
-
-test("a terminal without key releases types spaces normally", { skip }, async () => {
-	const { editor, hold, sessions } = harness(undefined, false);
-	try {
-		plainPress(hold, editor);
-		mock.timers.tick(HOLD_MS + 10);
-		await flush();
-
-		assert.equal(sessions.length, 0, "a tap must not start a hold");
-		assert.equal(editor.text, " ", "the space stays");
-
-		plainPress(hold, editor);
-		mock.timers.tick(HOLD_MS + 10);
-		await flush();
-
-		assert.equal(sessions.length, 0);
-		assert.equal(editor.text, "  ");
-	} finally {
-		mock.timers.reset();
-	}
-});
-
-test("the kitty flag alone does not prove releases arrive", { skip }, async () => {
-	const { editor, hold, sessions } = harness(undefined, false);
-	try {
-		// Herdr answers the kitty query for its panes, but cannot invent releases
-		// for an outer client that never sends them.
-		tui!.setKittyProtocolActive(true);
-		plainPress(hold, editor);
-		mock.timers.tick(HOLD_MS + 10);
-		await flush();
-
-		assert.equal(sessions.length, 0);
+		assert.equal(sessions.length, 1, "a new session needs a repeat");
 		assert.equal(editor.text, " ");
-	} finally {
-		tui!.setKittyProtocolActive(false);
-		mock.timers.reset();
-	}
-});
-
-test("a release from another key does not arm holds", { skip }, async () => {
-	const { editor, hold, sessions } = harness(undefined, false);
-	try {
-		// A multiplexer can report releases for some keys without forwarding the
-		// space release the hold gesture depends on.
-		hold.handle(LETTER_RELEASE);
-		plainPress(hold, editor);
-		mock.timers.tick(HOLD_MS + 10);
-		await flush();
-
-		assert.equal(sessions.length, 0);
-		assert.equal(editor.text, " ");
-	} finally {
-		mock.timers.reset();
-	}
-});
-
-test("a release arms the next hold", { skip }, async () => {
-	const { editor, hold, sessions } = harness(undefined, false);
-	try {
-		plainPress(hold, editor); // the first tap types a space
-		hold.handle(RELEASE); // its release proves holds can be detected
-
-		plainPress(hold, editor);
-		mock.timers.tick(HOLD_MS + 10);
-		await flush();
-
-		assert.equal(sessions.length, 1);
-		assert.equal(editor.text, " ", "the first tap's space stays");
-		hold.handle(RELEASE);
 	} finally {
 		mock.timers.reset();
 	}

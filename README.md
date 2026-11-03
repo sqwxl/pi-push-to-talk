@@ -20,7 +20,7 @@ Remove any other voice extension first. Several of them also bind space or repla
 
 | Action | Result |
 |---|---|
-| Hold space (> 350 ms) | Recording starts; text appears at the cursor every second and updates in place |
+| Hold space until the key repeats | Recording starts; text appears at the cursor every second and updates in place |
 | Release | That phrase is transcribed and committed |
 | Pause 2.5 s while holding | The open phrase is committed and dictation continues |
 | Tap space | An ordinary space, as usual |
@@ -110,7 +110,7 @@ Ports:
 ## Requirements
 
 - pi with extension support
-- A terminal that forwards key releases, not just one that claims the kitty keyboard protocol (kitty, Ghostty, foot, WezTerm, or tmux with extended keys)
+- A terminal with key repeat turned on. Every terminal repeats a held key; kitty, Ghostty, foot, WezTerm, and tmux with extended keys also name the repeat event.
 - A microphone the terminal may use, or a remote audio stream
 - `socat` and `parec` or `ffmpeg` on the machine with the microphone, for remote use
 - macOS, Linux, or Windows, x64 or arm64
@@ -122,8 +122,8 @@ Ports:
 - Brackets are stripped from transcripts, since Whisper emits them as sound captions. Dictating code with brackets is not supported.
 - The cursor is restored with simulated left-arrow presses, capped at 4,000 characters. Inserting near the start of a very long prompt can leave the cursor short of the dictation point.
 - Nested editors (dialogs) do not accept dictation, only normal typing.
-- Hold-to-talk turns on after the terminal reports its first space release. Terminals that never report space releases type spaces normally: the Linux console, most Android or iOS SSH clients, and Herdr panes whose outer client sends no releases. A multiplexer can answer the kitty protocol query for a pane, or report releases for other keys, without forwarding a space release.
-- If the terminal drops key releases, a second press stops dictation instead of the release. A re-press is recognised as a new key after 250 ms without a space event, so a keyboard whose auto-repeat is slower than that would stop early.
+- Hold-to-talk starts on the first key repeat, so dictation begins after the OS repeat delay, about 0.2 to 0.7 s. A terminal with key repeat turned off never starts a session; the space stays.
+- Key releases are optional. A terminal that sends none, such as the Linux console, stops dictation on the next key instead. A re-press is recognised as a new key after 250 ms without a space event, so a keyboard whose auto-repeat is slower than that would stop early.
 
 ## Diagnostics
 

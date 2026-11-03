@@ -30,8 +30,12 @@ export const CAP_CUT_SCAN_MS = 800;
 /** Mean level below which a buffer counts as silence, not speech. */
 export const MIN_PHRASE_RMS = 0.005;
 
-/** SPACE held this long starts dictating. */
-export const HOLD_MS = 350;
+/**
+ * A space press this soon after the previous one repeats a held key instead of
+ * tapping a second time. Kitty names repeats exactly; this window covers the
+ * terminals that send a bare space for both.
+ */
+export const REPEAT_GAP_MS = 150;
 
 /**
  * Loopback ports a client may forward its microphone helper to. Each client

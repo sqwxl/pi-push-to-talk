@@ -2,18 +2,18 @@
  * Hold SPACE to dictate.
  *
  * Hooks `ctx.ui.onTerminalInput`, the raw terminal path, because that is where
- * kitty key releases arrive. The press is left to the editor, so typing a space
- * never depends on this state machine: if the key stays down past HOLD_MS the
- * space the editor just typed is taken back and dictation starts.
+ * key repeats arrive. The press is left to the editor, so typing a space never
+ * depends on this state machine: once the key repeats, the spaces the editor
+ * typed are taken back and dictation starts.
  *
- * A terminal that does not report space releases cannot tell a tap from a hold.
- * It is not enough to ask whether the kitty protocol is active: a multiplexer
- * such as Herdr answers that query for its panes, but still has no space
- * release to forward when the outer terminal does not report one. Only an
- * observed space release proves that holds can be detected.
+ * A repeat proves the key is still down, and it needs no release event. Kitty
+ * names the event exactly; a terminal without the protocol sends the same bare
+ * space for a repeat, so there only a press that closely follows the previous
+ * one is evidence. Releases stop a session, but a terminal that sends none
+ * still dictates.
  */
 import { isKeyRelease, isKeyRepeat, matchesKey } from "@earendil-works/pi-tui";
-import { HOLD_MS, RELEASE_GAP_MS } from "./config.ts";
+import { REPEAT_GAP_MS, RELEASE_GAP_MS } from "./config.ts";
 import { trace } from "./debug.ts";
 import type { DictationEditor } from "./editor.ts";
 import { createRegion } from "./region.ts";
@@ -31,23 +31,21 @@ export type HoldDeps = {
 	createSession?: (stt: Stt | Promise<Stt>, ui: SessionUi) => DictationSession;
 };
 
-/** A hold with no release event for this long is treated as stale. */
-const STALE_HOLD_MS = 5000;
-
 export class SpaceHold {
 	private readonly deps: HoldDeps;
 	private session: DictationSession | undefined;
-	private holdTimer: ReturnType<typeof setTimeout> | undefined;
+	/** A space press may still become a hold until its release arrives. */
 	private holding = false;
-	private holdingSince = 0;
 	private starting = false;
 	private beginQueued = false;
 	/** Bumped by each new press and by cancel; an older begin must not claim it. */
 	private holdId = 0;
 	/** When the previous space event arrived, to spot a missing release. */
 	private lastSpaceAt = 0;
-	/** The terminal has sent a space release, so it can report a hold. */
-	private sawRelease = false;
+	/** Spaces this press typed into the editor that a hold must take back. */
+	private typedSpaces = 0;
+	/** Spaces an already running begin still has to take back. */
+	private pendingDelete = 0;
 	/** Resolves when the previous session finished its final decode. */
 	private stopping: Promise<unknown> = Promise.resolve();
 
@@ -70,9 +68,6 @@ export class SpaceHold {
 		}
 
 		if (matchesKey(data, "space")) {
-			// Only a space release proves that this key can be held. A release from
-			// another key says nothing about the key the gesture needs.
-			if (released) this.sawRelease = true;
 			return this.handleSpace(released, isKeyRepeat(data));
 		}
 
@@ -85,7 +80,8 @@ export class SpaceHold {
 		this.holding = false;
 		this.holdId++;
 		this.beginQueued = false;
-		this.clearHoldTimer();
+		this.typedSpaces = 0;
+		this.pendingDelete = 0;
 		this.session?.cancel();
 		this.session = undefined;
 	}
@@ -98,7 +94,7 @@ export class SpaceHold {
 		this.lastSpaceAt = now;
 
 		trace(
-			`space release=${String(released)} repeat=${String(repeated)} gap=${gap} holding=${String(this.holding)} releases=${String(this.sawRelease)} active=${String(this.session?.isActive())}`,
+			`space release=${String(released)} repeat=${String(repeated)} gap=${gap} holding=${String(this.holding)} typed=${this.typedSpaces} active=${String(this.session?.isActive())}`,
 		);
 
 		if (this.session?.isActive()) {
@@ -110,58 +106,33 @@ export class SpaceHold {
 
 		if (released) {
 			this.holding = false;
-			this.clearHoldTimer();
+			this.typedSpaces = 0;
 			// A session that failed by itself is already stopping; keep that
 			// shutdown visible to the next begin before the key is pressed again.
 			this.finish();
 			return false; // the space the editor typed stays
 		}
 
-		// Without a space release a tap and a hold look identical. Taking the space
-		// back would delete ordinary text and open the microphone for a key the
-		// user only tapped.
-		if (!this.canHold()) {
-			this.holding = false;
-			this.clearHoldTimer();
-			trace("hold skipped: terminal reports no space release");
-			return false; // the space the editor typed stays
+		// A repeat proves the key is down, where a tap would have ended. Kitty
+		// names the event; without it only a press this close to the previous one
+		// can be a repeat of the same key.
+		const hold = this.holding && (repeated || gap <= REPEAT_GAP_MS);
+		if (!hold) {
+			this.holding = true;
+			this.typedSpaces = 1;
+			this.holdId++;
+			return false; // the editor types the space
 		}
 
-		// Repeats of a held key must not type more spaces; the first one is the
-		// space we take back when the hold threshold is reached.
-		if (this.holding) {
-			if (now - this.holdingSince > STALE_HOLD_MS) {
-				this.holding = false; // release was lost; recover typing
-				return false;
-			}
-			return true;
-		}
-
-		if (repeated) return false;
-
-		this.holding = true;
-		this.holdingSince = Date.now();
-		this.holdId++;
-		const id = this.holdId;
-		this.holdTimer = setTimeout(() => {
-			this.holdTimer = undefined;
-			this.requestBegin(id);
-		}, HOLD_MS);
-		return false;
-	}
-
-	/**
-	 * True once this terminal proves it reports a space release. The kitty
-	 * protocol flag is not proof: a multiplexer can report it, or report other
-	 * keys' releases, for a client that never sends a space release.
-	 */
-	private canHold(): boolean {
-		return this.sawRelease;
+		// The triggering repeat is consumed, so only earlier presses typed a space.
+		this.pendingDelete += this.typedSpaces;
+		this.typedSpaces = 0;
+		this.requestBegin(this.holdId);
+		return true;
 	}
 
 	private finish(): void {
 		this.holding = false;
-		this.clearHoldTimer();
 		if (!this.session) return;
 		this.stopping = this.session.stop().catch((error: unknown) => {
 			this.deps.notify(`Dictation: ${String(error)}`, "error");
@@ -184,12 +155,15 @@ export class SpaceHold {
 			return;
 		}
 		this.starting = true;
+		let takenBack = 0;
 		try {
 			const editor = this.deps.getEditor();
 			if (!editor) return;
 
-			// Take back the space the editor typed when the key went down.
-			editor.deleteBackward();
+			// Take back the spaces the editor typed while the key repeated.
+			takenBack = this.pendingDelete;
+			this.pendingDelete = 0;
+			for (let i = 0; i < takenBack; i++) editor.deleteBackward();
 
 			// A previous stop may still be decoding its tail; its write would land
 			// on top of the text this session is about to produce.
@@ -199,8 +173,8 @@ export class SpaceHold {
 
 			// Released before capture began: the tap must not vanish.
 			if (!this.holding) {
-				trace("begin: released while the previous stop finished, space restored");
-				editor.typeSpace();
+				trace("begin: released while the previous stop finished, spaces restored");
+				for (let i = 0; i < takenBack; i++) editor.typeSpace();
 				return;
 			}
 
@@ -223,25 +197,23 @@ export class SpaceHold {
 			// space back if nothing was transcribed.
 			if (!this.holding) {
 				const committed = await session.stop();
-				if (!committed) editor.typeSpace();
+				if (!committed) {
+					for (let i = 0; i < takenBack; i++) editor.typeSpace();
+				}
 			}
 		} catch (error) {
 			this.deps.notify(`Dictation: ${String(error)}`, "error");
-			// Nothing was transcribed, so the deleted space comes back.
-			if (!this.session?.isActive()) this.deps.getEditor()?.typeSpace();
+			// Nothing was transcribed, so the deleted spaces come back.
+			if (!this.session?.isActive()) {
+				const editor = this.deps.getEditor();
+				for (let i = 0; i < takenBack; i++) editor?.typeSpace();
+			}
 		} finally {
 			this.starting = false;
 			if (this.beginQueued) {
 				this.beginQueued = false;
 				if (this.holding && !this.session?.isActive()) this.requestBegin(this.holdId);
 			}
-		}
-	}
-
-	private clearHoldTimer(): void {
-		if (this.holdTimer) {
-			clearTimeout(this.holdTimer);
-			this.holdTimer = undefined;
 		}
 	}
 }
