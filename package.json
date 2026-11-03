@@ -1,6 +1,6 @@
 {
   "name": "pi-push-to-talk",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "type": "module",
   "description": "Hold space to dictate into pi's prompt, transcribed locally with Whisper.",
   "keywords": [
@@ -26,9 +26,19 @@
     "node": ">=20"
   },
   "pi": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ]
   },
-  "files": ["index.ts", "src/**/*.ts", "!src/**/*.test.ts", "scripts/**", "README.md", "CHANGELOG.md", "LICENSE"],
+  "files": [
+    "index.ts",
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "scripts/**",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "scripts": {
     "changelog": "changelog-zero --history --style keepachangelog > CHANGELOG.md"
   },
@@ -40,7 +50,9 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "peerDependenciesMeta": {
-    "@earendil-works/pi-coding-agent": { "optional": true }
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "changelog-zero": "^0.1.0"
