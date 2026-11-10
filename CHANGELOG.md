@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. This project follows [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-11-10
+
+### Added
+
+- add selectable dictation models and languages ([5ebc8f3](https://github.com/sqwxl/pi-push-to-talk/commit/5ebc8f3cd99432bf52c90958731c4836ee916ac5))
+
 ## [0.6.3] - 2026-11-03
 
 ### Fixed
@@ -71,6 +77,7 @@ All notable changes to this project are documented here. This project follows [S
 - keep whisper punctuation at mid-session commits ([5a61c59](https://github.com/sqwxl/pi-push-to-talk/commit/5a61c5990b802db980860e432f695e198f09791f))
 - stop losing dictation on stop races, repeated phrases, and first use ([56db179](https://github.com/sqwxl/pi-push-to-talk/commit/56db1799acade9b19b5997e2db47155f814f88d9))
 
+[0.7.0]: https://github.com/sqwxl/pi-push-to-talk/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/sqwxl/pi-push-to-talk/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/sqwxl/pi-push-to-talk/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/sqwxl/pi-push-to-talk/compare/v0.6.0...v0.6.1
