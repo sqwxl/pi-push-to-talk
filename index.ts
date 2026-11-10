@@ -1,7 +1,18 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DictationEditor } from "./src/editor.ts";
 import { SpaceHold } from "./src/hold.ts";
+import { formatSelection, pickLanguage, pickSelection } from "./src/picker.ts";
+import {
+	defaultPreset,
+	isLanguageSupported,
+	labelForLanguage,
+	normalizeLanguage,
+	presetById,
+	type Preset,
+	type Selection,
+} from "./src/presets.ts";
 import { ProbeEditor } from "./src/probe.ts";
+import { loadSettings, saveSettings, type DictationSettings } from "./src/settings.ts";
 import { listAudioSources, pinAudioSource } from "./src/source.ts";
 import { parseHost, writeSetup } from "./src/setup.ts";
 import { Stt } from "./src/stt.ts";
@@ -16,27 +27,77 @@ type Ui = {
 export default function dictationExtension(pi: ExtensionAPI): void {
 	let ui: Ui | undefined;
 	let editor: DictationEditor | undefined;
+	let settings: DictationSettings = loadSettings();
 	let sttPromise: Promise<Stt> | undefined;
+	let sttKey: string | undefined;
+	let sttAbort: AbortController | undefined;
+	let sttGeneration = 0;
 	let unsubscribe: (() => void) | undefined;
 
-	const getStt = (): Promise<Stt> => {
-		if (!sttPromise) {
+	const selectedPreset = (): Preset => presetById(settings.selection.presetId) ?? defaultPreset();
+
+	/** Drop the cached recognizer and stop any load that is still running. */
+	const resetStt = (): void => {
+		sttGeneration++;
+		sttAbort?.abort();
+		sttAbort = undefined;
+		sttPromise = undefined;
+		sttKey = undefined;
+	};
+
+	const applySelection = (selection: Selection): boolean => {
+		const next: DictationSettings = { ...settings, selection };
+		try {
+			saveSettings(next);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			ui?.notify(`Dictation: could not save the model choice: ${message}`, "error");
+			return false;
+		}
+		settings = next;
+		resetStt();
+		return true;
+	};
+
+	const getStt = (notifyOnError = false): Promise<Stt> => {
+		const preset = selectedPreset();
+		const language = normalizeLanguage(preset, settings.selection.language);
+		const key = `${preset.id}:${language}`;
+		if (sttPromise && sttKey === key) return sttPromise;
+
+		resetStt();
+		const controller = new AbortController();
+		const generation = sttGeneration;
+		sttAbort = controller;
+		sttKey = key;
+
+		const promise = Stt.create(preset, language, {
+			signal: controller.signal,
 			// Model progress has its own key: the listening indicator blinks on the
 			// dictation key and must not overwrite a first-run download.
-			sttPromise = Stt.create(undefined, (message) => ui?.setStatus("dictation-model", message)).then(
-				(stt) => {
-					ui?.setStatus("dictation-model", undefined);
-					return stt;
-				},
-				(error: unknown) => {
-					// Do not cache a failure: the next hold retries.
+			onProgress: (message) => ui?.setStatus("dictation-model", message),
+		}).then(
+			(stt) => {
+				if (sttGeneration === generation) ui?.setStatus("dictation-model", undefined);
+				return stt;
+			},
+			(error: unknown) => {
+				// Do not cache a failure: the next hold retries.
+				if (sttGeneration === generation) {
 					sttPromise = undefined;
+					sttKey = undefined;
+					sttAbort = undefined;
 					ui?.setStatus("dictation-model", undefined);
-					throw error;
-				},
-			);
-		}
-		return sttPromise;
+				}
+				if (notifyOnError && !controller.signal.aborted) {
+					const message = error instanceof Error ? error.message : String(error);
+					ui?.notify(`Dictation: ${message}`, "error");
+				}
+				throw error;
+			},
+		);
+		sttPromise = promise;
+		return promise;
 	};
 
 	const hold = new SpaceHold({
@@ -78,6 +139,62 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 				const message = error instanceof Error ? error.message : String(error);
 				ctx.ui.notify(`Dictation: setup failed: ${message}`, "error");
 			}
+		},
+	});
+
+	pi.registerCommand("dictation-model", {
+		description: "Choose the dictation model and language",
+		handler: async (_args, ctx) => {
+			if (!ctx.hasUI) {
+				ctx.ui.notify("Dictation: choosing a model needs interactive mode", "warning");
+				return;
+			}
+			const choice = await pickSelection(ctx.ui, settings.selection);
+			if (!choice) return;
+			if (!applySelection(choice)) return;
+			const preset = presetById(choice.presetId) ?? defaultPreset();
+			ctx.ui.notify(`Dictation: ${formatSelection(preset, choice.language)}`, "info");
+			void getStt(true).catch(() => {});
+		},
+	});
+
+	pi.registerCommand("dictation-language", {
+		description: "Set the language for the current dictation model, e.g. /dictation-language fr",
+		handler: async (args, ctx) => {
+			const preset = selectedPreset();
+			const mode = preset.language;
+			if (mode.kind === "fixed") {
+				ctx.ui.notify(`Dictation: ${preset.label} uses ${labelForLanguage(mode.code)} only`, "info");
+				return;
+			}
+			if (mode.kind === "auto") {
+				ctx.ui.notify(`Dictation: ${preset.label} detects the language automatically`, "info");
+				return;
+			}
+
+			const typed = args.trim().toLowerCase();
+			let language: string | undefined;
+			if (typed) {
+				if (!isLanguageSupported(preset, typed)) {
+					ctx.ui.notify(
+						`Dictation: ${preset.label} does not list "${typed}". Run /dictation-language without a code to pick one.`,
+						"warning",
+					);
+					return;
+				}
+				language = typed;
+			} else {
+				if (!ctx.hasUI) {
+					ctx.ui.notify("Dictation: pass a language code, e.g. /dictation-language fr", "warning");
+					return;
+				}
+				language = await pickLanguage(ctx.ui, preset, settings.selection.language);
+				if (!language) return;
+			}
+
+			if (!applySelection({ presetId: preset.id, language })) return;
+			ctx.ui.notify(`Dictation: ${formatSelection(preset, language)}`, "info");
+			void getStt(true).catch(() => {});
 		},
 	});
 
@@ -134,6 +251,7 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_shutdown", () => {
 		hold.cancel();
+		resetStt();
 		unsubscribe?.();
 		unsubscribe = undefined;
 	});

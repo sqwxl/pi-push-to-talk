@@ -25,13 +25,33 @@ Remove any other voice extension first. Several of them also bind space or repla
 | Pause 2.5 s while holding | The open phrase is committed and dictation continues |
 | Tap space | An ordinary space, as usual |
 
-While you speak, the open phrase is drawn dim; committed text is normal. The footer alternates a red `●` with `○` every 600 ms: `● listening` while the microphone is live, or `● loading model` until Whisper is ready.
+While you speak, the open phrase is drawn dim; committed text is normal. The footer alternates a red `●` with `○` every 600 ms: `● listening` while the microphone is live, or `● loading model` until the model is ready.
+
+## Models
+
+Choose a model with `/dictation-model`. It asks for a language group first, then a model; a model that offers a language choice then asks for one. `/dictation-language fr` changes the language without reopening the model picker.
+
+| Section | Model | Size | Accuracy | Speed |
+|---|---|---|---|---|
+| Multilingual | Parakeet TDT v3 | 671 MB | ●●●●● | ●●●●○ |
+| Multilingual | Whisper Small | 375 MB | ●●●●○ | ●●○○○ |
+| Multilingual | SenseVoice Small | 228 MB | ●●●●○ | ●●●●● |
+| English | Whisper Base (default) | 154 MB | ●●●○○ | ●●●○○ |
+| English | Moonshine Base | 287 MB | ●●○○○ | ●●●●● |
+| English | Parakeet TDT v2 | 661 MB | ●●●●● | ●●●●● |
+| Arabic | Moonshine v2 Arabic * | 135 MB | ●●●○○ | ●●●●● |
+| Chinese | Moonshine v2 Chinese * | 135 MB | ●●●○○ | ●●●●● |
+| Japanese | Moonshine v2 Japanese * | 135 MB | ●●●○○ | ●●●●● |
+| Korean | Moonshine v2 Korean * | 69 MB | ●●○○○ | ●●●●● |
+| Spanish | Moonshine v2 Spanish * | 63 MB | ●●●○○ | ●●●●● |
+
+The circles are a relative guide, not a benchmark. Accuracy comes from published WER or CER figures, or an estimate for the language-specific models; speed is a rough CPU estimate. They are coarse on purpose. Whisper Small and Parakeet TDT v3 cover many languages; the English models and the language sections are more specific. `*` marks estimates.
+
+Models download when you select them. Existing files are reused, and an interrupted file leaves nothing that looks complete. The selection is stored in `push-to-talk.json` in Pi's agent directory.
 
 ## First run
 
-Whisper base is downloaded once, about 198 MB, into `~/.pi/models/whisper-base/`. Only the int8 files are kept. After that, dictation is fully offline.
-
-Extraction uses the system `tar` with bzip2 support, which is present on macOS, Linux, and Windows 10+.
+The default model, Whisper Base, downloads once into `~/.pi/models/whisper-base/`, about 154 MB. Choosing another model downloads that model instead. Files are fetched directly from Hugging Face; no system `tar` is needed. After that, dictation is fully offline.
 
 ## Remote machine
 
@@ -103,7 +123,7 @@ Ports:
 ## How it works
 
 - Capture: the local device through `decibri`, or 16 kHz mono PCM from `127.0.0.1:47777` when SSH forwards a microphone there.
-- Recognition: `sherpa-onnx-node` runs Whisper base int8 on the CPU, four threads.
+- Recognition: `sherpa-onnx-node` runs the selected int8 model on the CPU, four threads.
 - Segmentation: a phrase closes after 2.5 s of silence or 12 s of unbroken speech; the cut lands in the quietest part of the last 800 ms, not mid-syllable.
 - Editor: the extension owns the prompt editor, but only to write text. Keys are handled on the raw terminal path and only while the main editor has focus, so dialogs and nested editors keep working.
 
@@ -118,8 +138,10 @@ Ports:
 ## Known limits
 
 - Undo history records each preview rewrite; `Ctrl+Z` after a dictation steps back through them. The editor API offers no way to write without an undo entry.
-- English only.
-- Brackets are stripped from transcripts, since Whisper emits them as sound captions. Dictating code with brackets is not supported.
+- Model coverage and quality vary. Whisper Small, Parakeet TDT v3, and SenseVoice Small are multilingual; the English and language-specific presets are narrower. The circles are guidance, not a guarantee.
+- Language auto-detection can change on short phrases. Pin a language with `/dictation-language <code>` when the model offers one.
+- Phrase boundaries are joined with a space, so Chinese and Japanese dictation can contain spaces at pauses.
+- Brackets are stripped from transcripts, since some models emit them as sound captions. Dictating code with brackets is not supported.
 - The cursor is restored with simulated left-arrow presses, capped at 4,000 characters. Inserting near the start of a very long prompt can leave the cursor short of the dictation point.
 - Nested editors (dialogs) do not accept dictation, only normal typing.
 - Hold-to-talk starts on the first key repeat, so dictation begins after the OS repeat delay, about 0.2 to 0.7 s. A terminal with key repeat turned off never starts a session; the space stays.
@@ -138,7 +160,8 @@ Both are off unless the environment variable is set; both write only to `/tmp`.
 
 ```bash
 pi remove npm:pi-push-to-talk
-rm -rf ~/.pi/models/whisper-base   # optional, frees 154 MB
+rm -rf ~/.pi/models/whisper-base   # optional; remove the model folders you downloaded
+rm -f ~/.pi/agent/push-to-talk.json   # optional, forgets the selected model
 ```
 
 ## License

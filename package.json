@@ -2,7 +2,7 @@
   "name": "pi-push-to-talk",
   "version": "0.6.3",
   "type": "module",
-  "description": "Hold space to dictate into pi's prompt, transcribed locally with Whisper.",
+  "description": "Hold space to dictate into pi's prompt, transcribed locally with sherpa-onnx.",
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -10,6 +10,8 @@
     "push-to-talk",
     "speech-to-text",
     "whisper",
+    "parakeet",
+    "multilingual",
     "local"
   ],
   "license": "MIT",

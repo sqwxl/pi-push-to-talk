@@ -53,6 +53,7 @@ export const RELEASE_GAP_MS = 250;
 /** The listening indicator alternates filled and empty at this interval. */
 export const LISTENING_BLINK_MS = 600;
 
-export const MODEL_DIR = path.join(os.homedir(), ".pi", "models", "whisper-base");
+/** Root for downloaded models; each preset owns a subdirectory named by its id. */
+export const MODEL_ROOT = path.join(os.homedir(), ".pi", "models");
 
 export const msToSamples = (ms: number): number => Math.round((SAMPLE_RATE * ms) / 1000);
