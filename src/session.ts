@@ -118,8 +118,11 @@ export class DictationSession {
 		this.client = undefined;
 
 		const tail = this.segmenter.open();
+		const previewLength = this.region?.partial.length ?? 0;
+		const decodesTail = tail.length >= MIN_PHRASE_SAMPLES && rmsOf(tail) >= MIN_PHRASE_RMS;
+		trace(`stop tail=${tail.length} speech=${String(decodesTail)} preview=${previewLength}`);
 		this.segmenter.reset();
-		if (tail.length >= MIN_PHRASE_SAMPLES && rmsOf(tail) >= MIN_PHRASE_RMS) {
+		if (decodesTail) {
 			await this.decodePhrase(tail);
 		}
 
@@ -132,6 +135,7 @@ export class DictationSession {
 		// If the tail was too short to decode, or its decode returned nothing, the
 		// preview is the only transcript of that audio. Commit it, do not wipe it.
 		if (this.region && this.region.partial.length > 0) {
+			trace(`stop preview fallback; committing ${this.region.partial.length} chars`);
 			this.commitText(this.region.partial);
 			if (this.region.partial.length > 0) {
 				this.region = { ...this.region, partial: "" };
@@ -167,8 +171,8 @@ export class DictationSession {
 		if (this.stopped) return;
 		const closed = this.segmenter.add(samples);
 		if (!closed) return;
-		if (rmsOf(closed.samples) < MIN_PHRASE_RMS) return;
-		this.track(this.decodePhrase(closed.samples));
+		if (rmsOf(closed) < MIN_PHRASE_RMS) return;
+		this.track(this.decodePhrase(closed));
 	}
 
 	private async decodePhrase(samples: Float32Array): Promise<void> {

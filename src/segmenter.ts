@@ -1,23 +1,12 @@
 /**
  * Phrase boundaries.
  *
- * A phrase closes on SILENCE_COMMIT_MS of quiet, or at MAX_PHRASE_MS. The cap
- * cuts at the quietest point of the trailing CAP_CUT_SCAN_MS so it lands in a
- * breath rather than mid-syllable; the tail carries into the next phrase.
+ * A phrase closes on SILENCE_COMMIT_MS of quiet, or when the session stops.
+ * The trailing silence is trimmed except TAIL_PAD_MS so the last word is not
+ * clipped. A long uninterrupted phrase stays open: there is no speech-length
+ * cap, so the recognizer only sees a boundary the speaker actually made.
  */
-import {
-	CAP_CUT_SCAN_MS,
-	MAX_PHRASE_MS,
-	MIN_PHRASE_RMS,
-	SILENCE_COMMIT_MS,
-	TAIL_PAD_MS,
-	msToSamples,
-} from "./config.ts";
-
-export type ClosedPhrase = {
-	samples: Float32Array;
-	reason: "silence" | "cap";
-};
+import { MIN_PHRASE_RMS, SILENCE_COMMIT_MS, TAIL_PAD_MS, msToSamples } from "./config.ts";
 
 /**
  * Level of a buffer, with its mean removed.
@@ -56,8 +45,8 @@ export class Segmenter {
 	private silent = 0;
 	private hasSpeech = false;
 
-	/** Feed captured audio; returns a phrase when one closes. */
-	add(samples: Float32Array): ClosedPhrase | undefined {
+	/** Feed captured audio; returns a phrase when silence closes one. */
+	add(samples: Float32Array): Float32Array | undefined {
 		if (samples.length === 0) return undefined;
 		this.chunks.push(samples);
 		this.total += samples.length;
@@ -79,11 +68,9 @@ export class Segmenter {
 				this.reset();
 				return undefined;
 			}
-			return this.closeAt(Math.min(this.total, Math.max(0, this.total - this.silent + msToSamples(TAIL_PAD_MS))), "silence");
-		}
-
-		if (this.total >= msToSamples(MAX_PHRASE_MS)) {
-			return this.closeAt(this.quietestCut(), "cap");
+			return this.closeAt(
+				Math.min(this.total, Math.max(0, this.total - this.silent + msToSamples(TAIL_PAD_MS))),
+			);
 		}
 
 		return undefined;
@@ -102,36 +89,9 @@ export class Segmenter {
 		this.hasSpeech = false;
 	}
 
-	private closeAt(cut: number, reason: ClosedPhrase["reason"]): ClosedPhrase {
-		const all = concat(this.chunks);
-		const head = all.slice(0, cut);
-		// Silence that closed a phrase is not carried into the next one; only a
-		// cap cut keeps its tail, because that tail is still speech.
-		const tail = reason === "cap" ? all.slice(cut) : new Float32Array(0);
-		this.chunks = tail.length > 0 ? [tail] : [];
-		this.total = tail.length;
-		this.silent = 0;
-		// A cap cut keeps speech in the tail; a tail of pure silence must not
-		// look like speech, or the next phrase would decode silence.
-		this.hasSpeech = tail.length > 0 && rmsOf(tail) >= MIN_PHRASE_RMS;
-		return { samples: head, reason };
-	}
-
-	/** Start of the quietest 10 ms window in the trailing scan range. */
-	private quietestCut(): number {
-		const all = concat(this.chunks);
-		const scan = Math.min(all.length, msToSamples(CAP_CUT_SCAN_MS));
-		const step = msToSamples(10);
-		const from = Math.max(0, all.length - scan);
-		let bestAt = from;
-		let bestRms = Number.POSITIVE_INFINITY;
-		for (let at = from; at < all.length; at += step) {
-			const rms = rmsOf(all.subarray(at, Math.min(at + step, all.length)));
-			if (rms < bestRms) {
-				bestRms = rms;
-				bestAt = at;
-			}
-		}
-		return bestAt;
+	private closeAt(cut: number): Float32Array {
+		const phrase = concat(this.chunks).slice(0, cut);
+		this.reset();
+		return phrase;
 	}
 }

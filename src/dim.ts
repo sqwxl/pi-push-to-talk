@@ -32,6 +32,9 @@ function visibleChars(line: string): Array<{ text: string; at: number }> {
 /**
  * Wrap the `count` visible characters before the cursor in dim, per line.
  * Returns the input untouched when the cursor cannot be found or `count` is 0.
+ *
+ * Pi appends an ANSI reset to every rendered line, so a single dim pair cannot
+ * span a line break. Each line reopens and closes dim around its own segment.
  */
 export function dimBeforeCursor(lines: readonly string[], count: number): string[] {
 	if (count <= 0) return lines as string[];
@@ -59,26 +62,24 @@ export function dimBeforeCursor(lines: readonly string[], count: number): string
 	}
 	if (targets.length === 0) return [...lines];
 
-	const first = targets[targets.length - 1];
-	const last = targets[0];
-	if (!first || !last) return [...lines];
-
-	const byLine = new Map<number, Array<{ at: number; text: string }>>();
-	const push = (line: number, at: number, text: string) => {
-		const list = byLine.get(line) ?? [];
-		list.push({ at, text });
-		byLine.set(line, list);
-	};
-	push(first.line, first.at, DIM_ON);
-	push(last.line, last.at + last.length, DIM_OFF);
+	const ranges = new Map<number, { start: number; end: number }>();
+	for (const target of targets) {
+		const range = ranges.get(target.line);
+		if (!range) {
+			ranges.set(target.line, { start: target.at, end: target.at + target.length });
+			continue;
+		}
+		range.start = Math.min(range.start, target.at);
+		range.end = Math.max(range.end, target.at + target.length);
+	}
 
 	const out = [...lines];
-	for (const [lineIndex, insertions] of byLine) {
+	for (const [lineIndex, range] of ranges) {
 		let line = out[lineIndex] ?? "";
-		// Right to left so earlier indices stay valid.
-		for (const insertion of [...insertions].sort((a, b) => b.at - a.at)) {
-			line = line.slice(0, insertion.at) + insertion.text + line.slice(insertion.at);
-		}
+		// Close first, then open: the start index is still valid after the first
+		// insertion because it is earlier in the line.
+		line = line.slice(0, range.end) + DIM_OFF + line.slice(range.end);
+		line = line.slice(0, range.start) + DIM_ON + line.slice(range.start);
 		out[lineIndex] = line;
 	}
 	return out;

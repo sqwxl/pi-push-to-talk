@@ -280,3 +280,53 @@ test("speech captured while the model loads is transcribed", async () => {
 		mock.timers.reset();
 	}
 });
+
+test("release keeps the preview dim until the final decode resolves", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	try {
+		const writes: Array<{ text: string; partial: number }> = [];
+		const ui: SessionUi = {
+			write: (text, _cursor, partial) => writes.push({ text, partial }),
+			status: () => {},
+			indicator: (state, filled) => `${filled ? "●" : "○"} ${state === "loading" ? "loading model" : "listening"}`,
+			notify: () => {},
+		};
+		let release!: (text: string) => void;
+		let calls = 0;
+		const stt = {
+			recognize: async () => {
+				calls++;
+				if (calls === 1) return "hello there";
+				return new Promise<string>((resolve) => {
+					release = resolve;
+				});
+			},
+		} as unknown as Stt;
+		let feed: ((samples: Float32Array) => void) | undefined;
+		const session = new DictationSession(stt, ui, async ({ onSamples }) => {
+			feed = onSamples;
+			return { stop: () => {} };
+		});
+
+		await session.start(createRegion("", 0));
+		feed?.(speech(500));
+		mock.timers.tick(PARTIAL_INTERVAL_MS);
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(writes.at(-1)?.partial, "hello there".length);
+
+		const stopping = session.stop();
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(
+			writes.at(-1)?.partial,
+			"hello there".length,
+			"the preview stays dim while the final decode runs",
+		);
+
+		release("hello there");
+		await stopping;
+		assert.equal(writes.at(-1)?.partial, 0);
+		assert.equal(writes.at(-1)?.text, "hello there");
+	} finally {
+		mock.timers.reset();
+	}
+});

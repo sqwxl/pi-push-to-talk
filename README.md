@@ -124,7 +124,7 @@ Ports:
 
 - Capture: the local device through `decibri`, or 16 kHz mono PCM from `127.0.0.1:47777` when SSH forwards a microphone there.
 - Recognition: `sherpa-onnx-node` runs the selected int8 model on the CPU, four threads.
-- Segmentation: a phrase closes after 2.5 s of silence or 12 s of unbroken speech; the cut lands in the quietest part of the last 800 ms, not mid-syllable.
+- Segmentation: a phrase closes after 2.5 s of silence or when you release; a long uninterrupted phrase stays open, so the recognizer sees only boundaries you made.
 - Editor: the extension owns the prompt editor, but only to write text. Keys are handled on the raw terminal path and only while the main editor has focus, so dialogs and nested editors keep working.
 
 ## Requirements
@@ -138,6 +138,7 @@ Ports:
 ## Known limits
 
 - Undo history records each preview rewrite; `Ctrl+Z` after a dictation steps back through them. The editor API offers no way to write without an undo entry.
+- A long uninterrupted phrase stays open until you pause or release. The live preview re-decodes the whole phrase, so preview updates may lag on very long speech.
 - Model coverage and quality vary. Whisper Small, Parakeet TDT v3, and SenseVoice Small are multilingual; the English and language-specific presets are narrower. The circles are guidance, not a guarantee.
 - Language auto-detection can change on short phrases. Pin a language with `/dictation-language <code>` when the model offers one.
 - Phrase boundaries are joined with a space, so Chinese and Japanese dictation can contain spaces at pauses.

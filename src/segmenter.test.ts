@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MAX_PHRASE_MS, SILENCE_COMMIT_MS, TAIL_PAD_MS, msToSamples } from "./config.ts";
+import { SILENCE_COMMIT_MS, TAIL_PAD_MS, msToSamples } from "./config.ts";
 import { Segmenter, rmsOf } from "./segmenter.ts";
 
 const speech = (ms: number): Float32Array => {
@@ -23,22 +23,21 @@ test("a phrase closes only after enough silence", () => {
 
 	const closed = segmenter.add(silence(200));
 	assert.ok(closed, "expected a closed phrase");
-	assert.equal(closed?.reason, "silence");
 	// The phrase keeps a little trailing silence so its last word is not clipped.
-	assert.equal(closed?.samples.length, msToSamples(1000 + TAIL_PAD_MS));
+	assert.equal(closed.length, msToSamples(1000 + TAIL_PAD_MS));
 	assert.equal(segmenter.open().length, 0);
 });
 
-test("the cap fires at MAX_PHRASE_MS and keeps the tail open", () => {
+test("long speech stays open until silence or release", () => {
 	const segmenter = new Segmenter();
-	let closed;
-	for (let sent = 0; sent < Math.ceil((MAX_PHRASE_MS + 1000) / 100) && !closed; sent++) {
-		closed = segmenter.add(speech(100));
+	for (let sent = 0; sent < 300; sent++) {
+		assert.equal(segmenter.add(speech(100)), undefined, `closed after ${(sent + 1) / 10} s`);
 	}
-	assert.ok(closed, "expected the cap to fire");
-	assert.equal(closed?.reason, "cap");
-	assert.ok(closed.samples.length <= msToSamples(MAX_PHRASE_MS), "cut past the cap");
-	assert.ok(segmenter.open().length > 0, "tail should stay buffered");
+	assert.equal(segmenter.open().length, msToSamples(30000));
+
+	const closed = segmenter.add(silence(SILENCE_COMMIT_MS));
+	assert.ok(closed, "expected silence to close the phrase");
+	assert.equal(closed.length, msToSamples(30000 + TAIL_PAD_MS));
 });
 
 test("reset drops the open buffer", () => {

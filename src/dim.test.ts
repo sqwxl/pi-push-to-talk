@@ -26,10 +26,29 @@ test("spans line breaks and ignores colour codes when counting", () => {
 	const lines = ["\x1b[31mfirst line\x1b[0m", `second${CURSOR(" ")}`];
 	const out = dimBeforeCursor(lines, 8);
 	assert.equal(out.length, 2);
-	// Dim opens on the previous line and closes after the last character.
-	assert.match(out[0] ?? "", /\x1b\[2m/);
+	assert.equal(plain(out[0] ?? ""), "first line");
 	assert.equal(plain(out[1] ?? "").trimEnd(), "second");
-	assert.match(out[1] ?? "", /second\x1b\[22m/);
+	// Each line carries its own pair: a single pair would be erased by the
+	// TUI's per-line reset.
+	assert.match(out[0] ?? "", /\x1b\[2mne\x1b\[22m/);
+	assert.match(out[1] ?? "", /\x1b\[2msecond\x1b\[22m/);
+});
+
+test("each wrapped line reopens dim after the line reset", () => {
+	const lines = ["one\x1b[0m", "two\x1b[0m", `three${CURSOR(" ")}\x1b[0m`];
+	const out = dimBeforeCursor(lines, 8);
+	assert.equal(out[0], lines[0], "text outside the dim span is untouched");
+	for (const line of out.slice(1)) {
+		assert.match(line, /\x1b\[2m/);
+		assert.match(line, /\x1b\[22m/);
+	}
+});
+
+test("dims the previous line when the cursor starts a new one", () => {
+	const lines = ["hello", CURSOR("x")];
+	const out = dimBeforeCursor(lines, 5);
+	assert.match(out[0] ?? "", /\x1b\[2mhello\x1b\[22m/);
+	assert.equal(out[1]?.includes("\x1b[2m"), false);
 });
 
 test("returns the input when there is no cursor or nothing to dim", () => {
